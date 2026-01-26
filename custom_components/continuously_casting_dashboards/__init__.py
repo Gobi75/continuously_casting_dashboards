@@ -36,6 +36,14 @@ _LOGGER = logging.getLogger(__name__)
 # Global lock to prevent concurrent setup of the same entry
 _SETUP_LOCKS = {}
 
+async def _async_forward_entry_setup(hass: HomeAssistant, entry: ConfigEntry, platform: str) -> None:
+    """Forward entry setup using the correct Home Assistant API."""
+    forward_setups = getattr(hass.config_entries, "async_forward_entry_setups", None)
+    if forward_setups:
+        await forward_setups(entry, [platform])
+        return
+    await hass.config_entries.async_forward_entry_setup(entry, platform)
+
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the Continuously Cast Dashboards component."""
     hass.data.setdefault(DOMAIN, {})
@@ -211,7 +219,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.debug("Setting up platforms: %s", PLATFORMS)
                 for platform in PLATFORMS:
                     try:
-                        await hass.config_entries.async_forward_entry_setup(entry, platform)
+                        await _async_forward_entry_setup(hass, entry, platform)
                         _LOGGER.debug(f"Successfully set up platform {platform}")
                     except Exception as e:
                         _LOGGER.error(f"Error setting up platform {platform}: {e}")
@@ -289,7 +297,7 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             _LOGGER.debug("Setting up platforms after reload")
             for platform in PLATFORMS:
                 try:
-                    await hass.config_entries.async_forward_entry_setup(entry, platform)
+                    await _async_forward_entry_setup(hass, entry, platform)
                     _LOGGER.debug(f"Successfully set up platform {platform}")
                 except Exception as e:
                     _LOGGER.error(f"Error setting up platform {platform}: {e}")

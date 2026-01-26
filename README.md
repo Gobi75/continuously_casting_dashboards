@@ -23,7 +23,7 @@ A Home Assistant integration that automatically casts dashboards to your Chromec
   <img src="https://github.com/b0mbays/continuously_casting_dashboards/assets/55556007/9cc32333-312e-41cf-bca0-e531e535a268" width="75%" alt="Dashboard on Nest Hub">
 </p>
 
-## Features
+## ✨ Features
 
 - **Auto-resume** - Dashboard automatically restarts if interrupted
 - **Smart detection** - Won't interrupt Spotify, Netflix, YouTube, timers, or Google Assistant
@@ -33,7 +33,7 @@ A Home Assistant integration that automatically casts dashboards to your Chromec
 - **Speaker group aware** - Won't cast if device is part of an active speaker group
 - **Per-device settings** - Volume, time windows, and dashboards configured per device
 
-## Requirements
+## 📋 Requirements
 
 Before installing, ensure you have:
 
@@ -44,7 +44,7 @@ Before installing, ensure you have:
 | **ha-catt-fix** | Prevents display timeout after 10 minutes ([install via HACS](#install-ha-catt-fix)) |
 | **Kiosk Mode** | *Optional* - Hides navigation bars for fullscreen display ([install via HACS](https://github.com/NemesisRE/kiosk-mode)) |
 
-## Installation
+## 📦 Installation
 
 ### Via HACS (Recommended)
 
@@ -60,7 +60,7 @@ Before installing, ensure you have:
 2. Copy it to `config/custom_components/`
 3. Restart Home Assistant
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Add the Integration
 
@@ -85,7 +85,7 @@ The integration will start casting your dashboard during the configured time win
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### UI Configuration (Recommended)
 
@@ -139,7 +139,7 @@ continuously_casting_dashboards:
 
 ---
 
-## Advanced Usage
+## 🔧 Advanced Usage
 
 ### Multiple Dashboards Per Device
 
@@ -233,7 +233,7 @@ data:
 
 ---
 
-## Setup Guides
+## 📖 Setup Guides
 
 ### Trusted Networks Setup
 
@@ -271,7 +271,7 @@ This prevents the dashboard from timing out after 10 minutes.
 
 ---
 
-## Troubleshooting
+## ❓ Troubleshooting
 
 ### Dashboard stops after a few seconds
 
@@ -310,7 +310,7 @@ Settings → Google → Devices & sharing → Cast options → Turn off "Media c
 
 ---
 
-## Support
+## 💬 Support
 
 - **Issues:** [GitHub Issues](https://github.com/b0mbays/continuously_casting_dashboards/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/b0mbays/continuously_casting_dashboards/discussions)

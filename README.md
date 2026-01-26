@@ -1,4 +1,7 @@
-# Continuously Casting Dashboards
+<h1 align="center">
+  Continuously Casting Dashboards
+</h1>
+
 
 <p align="center">
   <img src="branding/logo.png" width="150" alt="CCD Logo">

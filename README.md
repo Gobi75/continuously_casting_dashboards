@@ -1,321 +1,322 @@
-# <center>**HA - Continuously Casting Dashboards** </center>
+# Continuously Casting Dashboards
 
 <p align="center">
-  <img src="branding/logo.png" width=15% height=20%>
+  <img src="branding/logo.png" width="150" alt="CCD Logo">
 </p>
-
-This custom integration for Home Assistant continuously casts dashboards to Chromecast devices during a specified time window. It ensures that the dashboard is always displayed during the active time window, even if the Chromecast device is accidentally interrupted or disconnected. It will ignore any devices that are currently playing Spotify, Netflix, Recipes etc. Timers will be overtaken by the dashboard but will continue to operate in the background.
-
-I'm using this myself for 5 chromecast devices: Lenovo Smart Display 8 & four 1st Gen Google Nest Hubs.
 
 <p align="center">
-  <img src="https://github.com/b0mbays/continuously_casting_dashboards/assets/55556007/9cc32333-312e-41cf-bca0-e531e535a268" width=75% height=75%>
+  <strong>Keep your Home Assistant dashboards always visible on Chromecast displays</strong>
 </p>
-<br/><br/>
 
-# ✨**Features:**
+<p align="center">
+  <a href="#installation">Installation</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#configuration">Configuration</a> •
+  <a href="#troubleshooting">Troubleshooting</a>
+</p>
 
-* Automatically casts specified Home Assistant dashboards to Chromecast devices.
-* Monitors the casting state of each device and resumes casting if interrupted.
-* Custom entity states for when to cast a dashboard (both globally and individual dashboards)
-* Multiple dashboard casting for the same device (cast different dashboards at different times).
-* Configurable global time window for active casting.
-* Configurable casting interval.
-* Configurable volume per device.
-* Configurable start and end times per device.
-* Google Home Speaker Group support.
-* **Exposes sensors for configuring and viewing global settings:**
+---
 
-  * `sensor.cast_delay`
-  * `sensor.logging_level`
-  * `sensor.start_time`
-  * `sensor.end_time`
-  * `sensor.switch_entity_id`
-  * `sensor.switch_entity_state`
+A Home Assistant integration that automatically casts dashboards to your Chromecast devices and keeps them running. If a dashboard gets interrupted (someone asks Google a question, plays music, etc.), it automatically resumes once the device is idle.
 
-  These sensors can be set via actions. For example:
+<p align="center">
+  <img src="https://github.com/b0mbays/continuously_casting_dashboards/assets/55556007/9cc32333-312e-41cf-bca0-e531e535a268" width="75%" alt="Dashboard on Nest Hub">
+</p>
 
-  ```yaml
-  action: continuously_casting_dashboards.set_cast_delay
-  target:
-    entity_id: sensor.cast_delay
-  data:
-    value: 60  # Must be between 5-300 seconds
-  ```
+## Features
 
-  ```yaml
-  action: continuously_casting_dashboards.set_logging_level
-  target:
-    entity_id: sensor.logging_level
-  data:
-    value: debug  # Must be one of: debug, info, warning, error, critical
-  ```
+- **Auto-resume** - Dashboard automatically restarts if interrupted
+- **Smart detection** - Won't interrupt Spotify, Netflix, YouTube, timers, or Google Assistant
+- **Time windows** - Only cast during specified hours (e.g., 7am-11pm)
+- **Multiple dashboards** - Different dashboards at different times on the same device
+- **Entity control** - Start/stop casting based on any Home Assistant entity state
+- **Speaker group aware** - Won't cast if device is part of an active speaker group
+- **Per-device settings** - Volume, time windows, and dashboards configured per device
 
-  ```yaml
-  action: continuously_casting_dashboards.set_start_time
-  target:
-    entity_id: sensor.start_time
-  data:
-    value: "07:00"  # Must be in HH:MM format
-  ```
+## Requirements
 
-  ```yaml
-  action: continuously_casting_dashboards.set_end_time
-  target:
-    entity_id: sensor.end_time
-  data:
-    value: "23:00"  # Must be in HH:MM format
-  ```
+Before installing, ensure you have:
 
-  ```yaml
-  action: continuously_casting_dashboards.set_switch_entity
-  target:
-    entity_id: sensor.switch_entity_id
-  data:
-    value: input_boolean.global_ccd_cast  # Must be a valid entity ID
-  ```
+| Requirement | Description |
+|-------------|-------------|
+| **HTTPS Access** | Home Assistant must be accessible via HTTPS. Use [Nabu Casa](https://www.nabucasa.com/) or [set up SSL yourself](https://www.makeuseof.com/secure-home-assistant-installation-free-ssl-certificate/) |
+| **Trusted Networks** | Chromecast devices must be able to access HA without login ([setup guide](#trusted-networks-setup)) |
+| **ha-catt-fix** | Prevents display timeout after 10 minutes ([install via HACS](#install-ha-catt-fix)) |
+| **Kiosk Mode** | *Optional* - Hides navigation bars for fullscreen display ([install via HACS](https://github.com/NemesisRE/kiosk-mode)) |
 
-  ```yaml
-  action: continuously_casting_dashboards.set_switch_state
-  target:
-    entity_id: sensor.switch_entity_state
-  data:
-    value: "on"  # Any string value
-  ```
+## Installation
 
-<br/><br/>
+### Via HACS (Recommended)
 
-✅ **Requirements:**
-====================
+1. Open HACS in Home Assistant
+2. Click the three dots (⋮) → **Custom repositories**
+3. Add `b0mbays/continuously_casting_dashboards` as an **Integration**
+4. Search for "Continuously Casting Dashboards" and click **Download**
+5. Restart Home Assistant
 
-1. **Home Assistant**
-2. **[HTTPS External Access](https://www.makeuseof.com/secure-home-assistant-installation-free-ssl-certificate/?newsletter_popup=1)** which HA requires for casting and the HACS Addon installed. **Alternatively, if you have a Nabu Casa subscription then this is already set up for you.**
+### Manual Installation
 
-   - *This **does** work without external access if you are behind a valid SSL cert locally*
-3. **Trusted network setup** for each Chromecast device to avoid logging in. See guide [here](https://blog.fuzzymistborn.com/homeassistant-and-catt-cast-all-the-things/) and follow the 'Trusted Networks' section half way down. You can either do your entire home network, or individual devices. You can find the IP address for each device by going to Settings -> Device Information -> Technical Information on the device.
+1. Download the `continuously_casting_dashboards` folder from this repository
+2. Copy it to `config/custom_components/`
+3. Restart Home Assistant
 
-   Your trusted networks section should then look something like this:
+## Quick Start
 
-   ```yaml
-   homeassistant:
-     external_url: "<your-external-url-for-home-assistant"
-     auth_providers:
-       - type: trusted_networks
-         trusted_networks:
-           - 192.168.12.236/32 #These are my display IP addresses, replace them with your own (including the /32)
-           - 192.168.12.22/32
-           - 192.168.12.217/32
-         trusted_users:
-           192.168.12.236: <your-user-id>  #Ensure this user has admin rights too
-           192.168.12.22: <your-user-id>
-           192.168.12.217: <your-user-id>
-         allow_bypass_login: true
-       - type: homeassistant
-   ```
-4. **[ha-catt-fix](https://github.com/swiergot/ha-catt-fix)** setup for your dashboard to keep the display 'awake' and not time out after 10 minutes. Install steps:
+### 1. Add the Integration
 
-   - Go to the HACS panel in Home Assistant
-   - Click on the three dots in the top right corner and choose "Custom repositories"
-   - Enter `swiergot/ha-catt-fix` in the "Add custom repository" field, select "Dashboard" from the "Category" dropdown, and click on the "Add" button.
-   - Go to the "Frontend" tab within HACS, and click on 'Explore and download repositories" and search for 'ha-catt-fix'.
-   - Click "Download"
-   - Restart Home Assistant
-   - Ensure that 'ha-catt-fix' is listed inside your dashboards resources. (_Your dashboard_ -> Three dots -> Edit -> Three dots -> Manage resources)
-5. **[Kiosk Mode](https://github.com/NemesisRE/kiosk-mode)** for hiding the navigations bars for fullscreen dashboards on your displays.
-
-<br/><br/>
-
-🚀**Installation**
-==================
-
-### **HACS**
-
-1. Go to the HACS panel in Home Assistant.
-2. Click on the three dots in the top right corner and choose "Custom repositories".
-3. Enter `b0mbays/continuously_casting_dashboards` in the "Add custom repository" field, select "Integration" from the "Category" dropdown, and click on the "Add" button.
-4. Once the custom repository is added, you can install the integration through HACS. You should see "Continuously Cast Dashboards" in the "Integrations" tab. Click on "Download" to add it to your Home Assistant instance.
-5. Restart Home Assistant to load the custom integration.
-6. Setup your devices inside the configuration.yaml file, follow the steps from the configuration section below.
-7. Restart again to start the integration.
-
-<br/><br/>
-
-⚡️**How does it work?**
-=========================
-
-The integration uses [CATT's](https://github.com/skorokithakis/catt) functionality to 'call' each of your Google Chromecast devices checking the status every 45 seconds (you can change this in the config) for any 'state' changes. If there is no media playing on the device, then the dashboard will be cast. If the device already has the dashboard casting then it will be ignored. And if there is youtube/recipes/spotify playing on the device then it will also be ignored.
-
-The casting functionality within Home Assistant requires your instance to be accesible via HTTPS with either paying for a Nabu Casa subscription or setting this up yourself. I opted to subscribe to Nabu Casa to help support HA development. Previously, I did set this up myself and the guide I used is [here](https://www.makeuseof.com/secure-home-assistant-installation-free-ssl-certificate/?newsletter_popup=1).
-
-<br/><br/>
-
-⚙️**Configuration**
-=====================
-
-### UI Configuration
-
-The integration can be configured through the Home Assistant UI:
-
-1. Go to **Settings** > **Devices & Services**
-2. Click the **Add Integration** button
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration**
 3. Search for "Continuously Casting Dashboards"
-4. Follow the configuration steps:
+4. Follow the setup wizard
 
-   - Set global settings (logging level, cast delay, time window)
-   - Add devices and their dashboards
-   - Configure dashboard-specific settings (URL, volume, time window, etc.)
+### 2. Configure Your First Device
 
-   Further explanation of configuration parameters is provided in the YAML examples below.
+The wizard will guide you through:
+
+1. **Global settings** - Logging level, cast delay, default time window
+2. **Add device** - Enter your Chromecast display name (find it in Google Home app or device settings)
+3. **Dashboard URL** - The full URL to your dashboard (e.g., `http://192.168.1.100:8123/lovelace/dashboard?kiosk`)
+
+> **Tip:** Use your Home Assistant's local IP address in the dashboard URL, not `homeassistant.local`
+
+### 3. Done!
+
+The integration will start casting your dashboard during the configured time window.
+
+---
+
+## Configuration
+
+### UI Configuration (Recommended)
+
+All settings can be managed through **Settings** → **Devices & Services** → **Continuously Casting Dashboards** → **Configure**.
 
 ### YAML Configuration
 
-The integration also supports YAML configuration. If you have an existing YAML configuration, it will be automatically imported into the UI configuration when you add the integration.
-
-**Note**: After importing YAML configuration, it is recommended to manage your configuration through the UI.
-
-To configure the integration via YAML, add the following to your `configuration.yaml` file:
+Add to your `configuration.yaml`:
 
 ```yaml
 continuously_casting_dashboards:
-  logging_level: warning #Required: Set the logging level - debug/info/warning (default is 'warning' - try 'debug' for debugging)
-  cast_delay: 45 #Required: Time (in seconds) for casting checks between each device.
-  start_time: "07:00" #Optional: Global start time of the casting window (format: "HH:MM") - Default is set to "07:00" and can be individually overwritten per device below.
-  end_time: "01:00" #Optional: Global end time of the casting window (format: "HH:MM") and must be after "00:00". Default is set to "01:00" and can be individually overwritten per device below.
+  logging_level: warning    # debug, info, warning, error, critical
+  cast_delay: 45            # Seconds between device checks (5-300)
+  start_time: "07:00"       # Global start time (HH:MM)
+  end_time: "01:00"         # Global end time (HH:MM)
+
   devices:
-    "<Display_Name>": #Required: Display name or IP address of your device. Find this on the actual device's settings or inside the Google Home app.
-      - dashboard_url: "<Dashboard_URL>" #Required: Dashboard URL to be casted (This must be the local IP address of your HA instance, not homeassistant.local)
-        volume: 5 #Optional: Volume to set the display. (If you remove this, the device will remain the same volume)
-        start_time: "07:00" #Optional: Set the start time for this device
-        end_time: "01:00" #Optional: Set the end time for this device
-    "<Display_Name>": 
-      - dashboard_url: "<Dashboard_URL>" 
-        volume: <Volume>
-        start_time: "<Start_Time>" 
-        end_time: "<End_Time>"
-        speaker_groups: #Optional: Here you can set speaker groups that your device might be a member of to skip casting if they are active.
-          - "<Speaker group name>" #Optional: Speaker group name
-          - "<Speaker group name>" #Optional: Extra speaker group names
+    "Living Room Display":  # Device name from Google Home app
+      - dashboard_url: "http://192.168.1.100:8123/lovelace/home?kiosk"
+        volume: 5           # Optional: 0-100
+        start_time: "06:00" # Optional: Override global time
+        end_time: "23:00"
 
-    #You can then add more devices repeating the above format:
-
-    # Examples:
-    # "Office display":
-    #   - dashboard_url: "http://192.168.12.104:8123/nest-dashboard/default_view?kiosk"
-    #     volume: 7
-    #     start_time: "06:00" 
-    #     end_time: "18:00"
-    # "Kitchen display":
-    #   - dashboard_url: "http://192.168.12.104:8123/kitchen-dashboard/default_view?kiosk"
-    #     volume: 9
-    #     start_time: "06:00" 
-    #     end_time: "22:00"
-    # "192.168.12.217":  //IP address can also be used
-    #   - dashboard_url: "http://192.168.12.104:8123/nest-dashboard/default_view?kiosk"
-    #     volume: 4
-    #     start_time: "18:00" 
-    #     end_time: "03:00"
-    #     speaker_groups:
-    #       - "Upstairs Speakers"
-    #       - "Downstairs Speakers"
+    "Kitchen Hub":
+      - dashboard_url: "http://192.168.1.100:8123/lovelace/kitchen?kiosk"
+        volume: 7
 ```
 
-<br/><br/>
-**↕️ Multiple dashboard casting**
-===================================
+### Configuration Options
 
-With this feature, you can configure multiple dashboards to be cast at different times for the same device. To enable this feature, add multiple dashboards and time windows to each devices configuration, for example:
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `logging_level` | Yes | `warning` | Log verbosity: `debug`, `info`, `warning`, `error`, `critical` |
+| `cast_delay` | Yes | `45` | Seconds between checking each device (5-300) |
+| `start_time` | No | `07:00` | When to start casting (HH:MM format) |
+| `end_time` | No | `01:00` | When to stop casting (HH:MM format) |
+| `switch_entity_id` | No | - | Entity that controls casting on/off globally |
+| `switch_entity_state` | No | `on` | State value that enables casting |
+
+### Per-Device Options
+
+| Option | Required | Default | Description |
+|--------|----------|---------|-------------|
+| `dashboard_url` | Yes | - | Full URL to the dashboard |
+| `volume` | No | - | Device volume (0-100) |
+| `start_time` | No | Global | Override the global start time |
+| `end_time` | No | Global | Override the global end time |
+| `switch_entity_id` | No | - | Entity that controls this specific device |
+| `switch_entity_state` | No | `on` | State value that enables casting for this device |
+| `speaker_groups` | No | - | Speaker groups to check before casting |
+
+---
+
+## Advanced Usage
+
+### Multiple Dashboards Per Device
+
+Cast different dashboards at different times:
 
 ```yaml
 devices:
-   ...
-     "Office display":
-       - dashboard_url: "http://192.168.12.104:8123/day-dashboard/default_view?kiosk"
-         volume: 7
-         start_time: "07:00" 
-         end_time: "23:59"
-       - dashboard_url: "http://192.168.12.104:8123/night-dashboard/default_view?kiosk"
-         volume: 7
-         start_time: "00:01" 
-         end_time: "03:00"
+  "Office Display":
+    - dashboard_url: "http://192.168.1.100:8123/lovelace/day?kiosk"
+      start_time: "07:00"
+      end_time: "18:00"
+    - dashboard_url: "http://192.168.1.100:8123/lovelace/night?kiosk"
+      start_time: "18:00"
+      end_time: "23:59"
 ```
 
-<br/><br/>
+### Control Casting with Entity State
 
-<br/><br/>
-**🎮Casting based on entity states**
-====================================
-
-With this feature, you can control if the casting will start or stop based on a HA entity either globally or per device. For example, lets create a new boolean switch inside your configuration.yaml file of which you want to use to control the casting - for example:
+Control casting globally or per-device using any Home Assistant entity:
 
 ```yaml
+# Create a toggle in configuration.yaml
 input_boolean:
-  global_ccd_cast:
-    name: "CCD Global Casting"
+  enable_dashboard_casting:
+    name: "Enable Dashboard Casting"
     initial: on
+
+# Reference it in the integration config
+continuously_casting_dashboards:
+  switch_entity_id: "input_boolean.enable_dashboard_casting"
+  # ... rest of config
 ```
 
-For the above entity we have named it 'global_ccd_cast' and configured it to be initiallty set to 'on'. This means that if Home Assistant restarts, then casting will always be enabled. And then if we were to switch the entity to 'off' then casting will be stopped globally for all devices.
+**Default "on" states:** `on`, `true`, `home`, `open`
 
-Now we need to add this entity to the global CCD section inside your configuration.yaml file:
+For custom states, use `switch_entity_state`:
 
 ```yaml
 continuously_casting_dashboards:
-  logging_level: debug
-  cast_delay: 25
-  start_time: "06:00"
-  end_time: "02:00"
-  switch_entity_id: "input_boolean.global_ccd_cast"
-  devices:
-    ...
+  switch_entity_id: "sensor.house_mode"
+  switch_entity_state: "occupied"
 ```
 
-We have added the 'switch_entity_id' field to our main section with the CCD configuration. This means it will either start or stop casting based on whether this switch is enabled or disabled.
+### Speaker Group Handling
 
-By default, the integration considers an entity to be "enabled" when its state is one of: 'on', 'true', 'home', or 'open'. You can also specify a custom state to be considered as "enabled" using the `switch_entity_state` parameter.
+Prevent casting when the device is playing in a speaker group:
 
 ```yaml
-continuously_casting_dashboards:
-  logging_level: debug
-  cast_delay: 25
-  start_time: "06:00"
-  end_time: "02:00"
-  switch_entity_id: "sensor.human_is_home"
-  switch_entity_state: "home"
-  devices:
-    ...
+devices:
+  "Kitchen Hub":
+    - dashboard_url: "http://192.168.1.100:8123/lovelace/kitchen?kiosk"
+      speaker_groups:
+        - "Kitchen Speakers"
+        - "Whole House Audio"
 ```
 
-For the above example, you may have a sensor that detects if you are home. Then, whenever this sensor is "home" the integration will be enabled.
+### Runtime Configuration via Services
 
-You can also set entity states per dashboard on the device. This will ignore the global state entirely and depend only on this entity.
-
-For example:
+Adjust settings without restarting using Home Assistant services:
 
 ```yaml
-continuously_casting_dashboards:
-  # global configuration...
-  devices:
-    "Living Room Display":
-      - dashboard_url: "http://192.168.1.10:8123/lovelace/dashboard?kiosk"
-        switch_entity_id: "sensor.living_room_mode"
-        switch_entity_state: "entertainment"  # Custom state that enables casting
-    # other devices...
+# Change cast delay
+service: continuously_casting_dashboards.set_cast_delay
+target:
+  entity_id: sensor.cast_delay
+data:
+  value: 60
+
+# Change time window
+service: continuously_casting_dashboards.set_start_time
+target:
+  entity_id: sensor.start_time
+data:
+  value: "08:00"
+
+# Change logging level
+service: continuously_casting_dashboards.set_logging_level
+target:
+  entity_id: sensor.logging_level
+data:
+  value: debug
 ```
 
-<br/><br/>
+**Available services:**
+- `set_cast_delay` - Cast interval (5-300 seconds)
+- `set_logging_level` - debug, info, warning, error, critical
+- `set_start_time` - Start time (HH:MM)
+- `set_end_time` - End time (HH:MM)
+- `set_switch_entity` - Global control entity
+- `set_switch_state` - State that enables casting
 
-⚠️**Troubleshooting**
-=======================
+---
 
-- I have an annoying notification on my phone for 'DashCast'?
+## Setup Guides
 
-  On your Android phone, go to Settings > Google > All Services > Devices & sharing > Cast options > Turn off Media controls for Cast devices. This will turn off controls for any other casting device      although I don't find myself using it for anything else so I have it disabled.
-- The dashboard starts on my device and then stops within a few seconds.
+### Trusted Networks Setup
 
-  If this is happening, you may not have installed the ha-catt-fix correctly and your device will be using a different state name for when a dashboard is "active". The device should be reporting "Dummy". You can find out what your device is reporting by changing the "logging_level" to "debug"; then going to the Home Assistant logs and you will see logs for this integration. In the logs you should find a log checking the status output for a working dashboard state. For example, mine looks like this:
+Chromecast devices need to access Home Assistant without logging in.
 
-  ```
-  DEBUG (MainThread) [custom_components.continuously_casting_dashboards.dashboard_caster] Status output for Office display when checking for dashboard state 'Dummy': Title: Dummy 22:27:13 GMT+0000 (Greenwich Mean Time)
-  Volume: 50
-  ```
-  If "Dummy" is missing here, please ensure you have installed the ha-catt-fix correctly from following the instructions from the [requirements](#requirements) section.
+1. Find your Chromecast device IPs (Settings → Device Information → Technical Information on each device)
+
+2. Add to your `configuration.yaml`:
+
+```yaml
+homeassistant:
+  auth_providers:
+    - type: trusted_networks
+      trusted_networks:
+        - 192.168.1.50/32   # Living Room Display
+        - 192.168.1.51/32   # Kitchen Hub
+      trusted_users:
+        192.168.1.50: YOUR_USER_ID
+        192.168.1.51: YOUR_USER_ID
+      allow_bypass_login: true
+    - type: homeassistant    # Keep normal login for other devices
+```
+
+> **Find your user ID:** Go to your profile in Home Assistant and look at the URL - the ID is the long string after `/profile/`
+
+### Install ha-catt-fix
+
+This prevents the dashboard from timing out after 10 minutes.
+
+1. Open HACS → Click three dots (⋮) → **Custom repositories**
+2. Add `swiergot/ha-catt-fix` as a **Dashboard** (previously called "Lovelace")
+3. Go to **Frontend** tab → Search "ha-catt-fix" → **Download**
+4. Restart Home Assistant
+5. Verify installation: Open your dashboard → Edit → Manage resources → Confirm ha-catt-fix is listed
+
+---
+
+## Troubleshooting
+
+### Dashboard stops after a few seconds
+
+**Cause:** ha-catt-fix not installed correctly.
+
+**Solution:**
+1. Set `logging_level: debug` in your config
+2. Check Home Assistant logs for status output
+3. Look for `Title: Dummy` in the logs - if missing, reinstall ha-catt-fix
+
+```
+DEBUG Status output for Office display: Title: Dummy 22:27:13 GMT+0000
+```
+
+### Device not found
+
+**Cause:** Device name doesn't match exactly.
+
+**Solution:**
+- Check the exact name in Google Home app or on the device itself
+- Try using the device's IP address instead of its name
+
+### Dashboard won't cast
+
+**Checklist:**
+- [ ] HTTPS is configured for Home Assistant
+- [ ] Device IP is in trusted networks
+- [ ] Dashboard URL uses local IP (not `homeassistant.local`)
+- [ ] Current time is within the configured time window
+- [ ] No media is playing on the device
+
+### Annoying phone notifications for "DashCast"
+
+**Solution:** On your Android phone:
+Settings → Google → Devices & sharing → Cast options → Turn off "Media controls for Cast devices"
+
+---
+
+## Support
+
+- **Issues:** [GitHub Issues](https://github.com/b0mbays/continuously_casting_dashboards/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/b0mbays/continuously_casting_dashboards/discussions)
+
+---
+
+<p align="center">
+  <sub>Tested with Lenovo Smart Display 8 and Google Nest Hub (1st Gen)</sub>
+</p>

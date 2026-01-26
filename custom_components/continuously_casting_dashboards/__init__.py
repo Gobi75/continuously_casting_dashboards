@@ -36,6 +36,32 @@ _LOGGER = logging.getLogger(__name__)
 # Global lock to prevent concurrent setup of the same entry
 _SETUP_LOCKS = {}
 
+async def _read_notification_state(hass: HomeAssistant, storage_file: str) -> bool:
+    """Read notification state without blocking the event loop."""
+    def _read():
+        if not os.path.exists(storage_file):
+            return False
+        with open(storage_file, "r") as f:
+            data = json.load(f)
+            return data.get("acknowledged", False)
+
+    try:
+        return await hass.async_add_executor_job(_read)
+    except Exception as ex:
+        _LOGGER.debug("Error loading notification state: %s", ex)
+        return False
+
+async def _write_notification_state(hass: HomeAssistant, storage_file: str, acknowledged: bool) -> None:
+    """Write notification state without blocking the event loop."""
+    def _write():
+        with open(storage_file, "w") as f:
+            json.dump({"acknowledged": acknowledged}, f)
+
+    try:
+        await hass.async_add_executor_job(_write)
+    except Exception as ex:
+        _LOGGER.debug("Failed to save acknowledged state: %s", ex)
+
 async def _async_forward_entry_setup(hass: HomeAssistant, entry: ConfigEntry, platform: str) -> None:
     """Forward entry setup using the correct Home Assistant API."""
     forward_setups = getattr(hass.config_entries, "async_forward_entry_setups", None)
@@ -52,15 +78,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
     storage_file = hass.config.path(f".{DOMAIN}_notification_state.json")
     _LOGGER.debug(f"Using storage file at: {storage_file}")
     
-    notification_shown = False
-    
-    try:
-        if os.path.exists(storage_file):
-            with open(storage_file, 'r') as f:
-                data = json.load(f)
-                notification_shown = data.get('acknowledged', False)
-    except Exception as ex:
-        _LOGGER.debug(f"Error loading notification state: {ex}")
+    notification_shown = await _read_notification_state(hass, storage_file)
 
     if DOMAIN in config:
         _LOGGER.debug("Found YAML configuration for Continuously Cast Dashboards")
@@ -98,12 +116,8 @@ async def async_setup(hass: HomeAssistant, config: dict):
                     # See if our notification_id appears anywhere in the event data
                     event_data_str = str(event.data)
                     if notification_id in event_data_str:
-                        try:
-                            # Save the acknowledged state regardless of the exact event type
-                            with open(storage_file, 'w') as f:
-                                json.dump({"acknowledged": True}, f)
-                        except Exception as ex:
-                            _LOGGER.debug(f"Failed to save acknowledged state: {ex}")
+                        # Save the acknowledged state regardless of the exact event type
+                        await _write_notification_state(hass, storage_file, True)
             
             # Listen for ALL events for diagnostic purposes
             remove_listener = hass.bus.async_listen("*", log_all_events)
@@ -119,19 +133,13 @@ async def async_setup(hass: HomeAssistant, config: dict):
                 await asyncio.sleep(300)  # 5 minutes
                 
                 # Check if we've already acknowledged
-                try:
-                    if os.path.exists(storage_file):
-                        with open(storage_file, 'r') as f:
-                            data = json.load(f)
-                            if data.get('acknowledged', False):
-                                return  # Already acknowledged, nothing to do
-                    
-                    # Not acknowledged yet, do it now
-                    _LOGGER.debug("Auto-acknowledging notification after timeout")
-                    with open(storage_file, 'w') as f:
-                        json.dump({"acknowledged": True}, f)
-                except Exception as ex:
-                    _LOGGER.debug(f"Error in auto-acknowledge: {ex}")
+                acknowledged = await _read_notification_state(hass, storage_file)
+                if acknowledged:
+                    return  # Already acknowledged, nothing to do
+
+                # Not acknowledged yet, do it now
+                _LOGGER.debug("Auto-acknowledging notification after timeout")
+                await _write_notification_state(hass, storage_file, True)
             
             # Start the auto-acknowledge task
             hass.async_create_task(auto_acknowledge())

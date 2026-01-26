@@ -34,6 +34,7 @@ STATUS_UNKNOWN = "unknown"
 STATUS_STOPPED = "stopped"
 STATUS_SPEAKER_GROUP_ACTIVE = "speaker_group_active"
 STATUS_CASTING_IN_PROGRESS = "casting_in_progress"
+STATUS_ASSISTANT_ACTIVE = "assistant_active"
 
 # Health stats event types
 EVENT_CONNECTION_ATTEMPT = "connection_attempt"

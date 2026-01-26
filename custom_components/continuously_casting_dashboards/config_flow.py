@@ -175,7 +175,7 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
                 ): cv.string,
                 vol.Optional(
                     "switch_entity_state",
-                    default=self._base_config.get("switch_entity_state", ""),
+                    default="",
                 ): cv.string,
             }
         )

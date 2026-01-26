@@ -12,7 +12,8 @@ from .const import (
     EVENT_DISCONNECTED, 
     EVENT_RECONNECT_ATTEMPT,
     EVENT_RECONNECT_SUCCESS, 
-    EVENT_RECONNECT_FAILED
+    EVENT_RECONNECT_FAILED,
+    STATUS_ASSISTANT_ACTIVE
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ class StatsManager:
         disconnected_count = sum(1 for d in active_devices.values() if d.get('status') == 'disconnected')
         media_playing_count = sum(1 for d in active_devices.values() if d.get('status') == 'media_playing')
         other_content_count = sum(1 for d in active_devices.values() if d.get('status') == 'other_content')
+        assistant_active_count = sum(1 for d in active_devices.values() if d.get('status') == STATUS_ASSISTANT_ACTIVE)
         
         # Format for Home Assistant sensors
         status_data = {
@@ -99,6 +101,7 @@ class StatsManager:
             'disconnected_devices': disconnected_count,
             'media_playing_devices': media_playing_count,
             'other_content_devices': other_content_count,
+            'assistant_active_devices': assistant_active_count,
             'last_updated': datetime.now().isoformat(),
             'devices': {}
         }

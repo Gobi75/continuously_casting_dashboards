@@ -21,6 +21,87 @@ class DeviceManager:
         self.device_ip_cache = {}  # Cache for device IPs
         self.active_devices = {}   # Track active devices
         self.active_checks = {}    # Track active status checks
+        self.status_cache = {}     # Short-lived cache for catt status output
+
+    def _cache_status_output(self, ip, output):
+        """Cache status output briefly to avoid duplicate catt calls."""
+        if not output:
+            return
+        self.status_cache[ip] = {
+            "output": output,
+            "timestamp": time.time(),
+        }
+
+    def _get_cached_status_output(self, ip, max_age=2.0):
+        """Get cached status output if it's fresh enough."""
+        cached = self.status_cache.get(ip)
+        if not cached:
+            return None
+        if (time.time() - cached.get("timestamp", 0)) > max_age:
+            return None
+        return cached.get("output")
+
+    def _status_indicates_assistant_activity(self, status_output):
+        """Detect Google Assistant/timer activity from catt status output."""
+        if not status_output:
+            return False
+        status_lower = status_output.lower()
+
+        # Avoid matching "homeassistant" or "home assistant" as "assistant"
+        sanitized = status_lower.replace("homeassistant", "").replace("home assistant", "")
+
+        if "google assistant" in sanitized:
+            return True
+
+        # Match 'assistant' as a standalone word to reduce false positives
+        if re.search(r"\bassistant\b", sanitized):
+            return True
+
+        assistant_keywords = [
+            "timer",
+            "alarm",
+            "reminder",
+            "stopwatch",
+            "countdown",
+        ]
+        return any(keyword in sanitized for keyword in assistant_keywords)
+
+    async def _async_run_status_command(self, ip, timeout=15.0, allow_cache=True):
+        """Run catt status and return stdout/stderr/returncode."""
+        if allow_cache:
+            cached_output = self._get_cached_status_output(ip)
+            if cached_output is not None:
+                return cached_output, "", 0, True
+
+        cmd = ['catt', '-d', ip, 'status']
+        _LOGGER.debug(f"Executing command: {' '.join(cmd)}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.warning(f"Status check timed out for {ip}")
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                process.kill()
+            return None, None, None, False
+
+        stdout_str = stdout.decode().strip()
+        stderr_str = stderr.decode().strip()
+        _LOGGER.debug(f"Status command stdout: {stdout_str}")
+        _LOGGER.debug(f"Status command stderr: {stderr_str}")
+
+        if process.returncode == 0:
+            self._cache_status_output(ip, stdout_str)
+
+        return stdout_str, stderr_str, process.returncode, False
     
     async def async_get_device_ip(self, device_name_or_ip):
         """Get IP address for a device name or directly use IP if provided."""
@@ -127,34 +208,13 @@ class DeviceManager:
         
         try:
             _LOGGER.debug(f"Checking if media is playing on device at {ip}")
-            cmd = ['catt', '-d', ip, 'status']
-            _LOGGER.debug(f"Executing command: {' '.join(cmd)}")
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
-            except asyncio.TimeoutError:
-                _LOGGER.warning(f"Media status check timed out for {ip}")
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    process.kill()
+            stdout_str, stderr_str, returncode, _ = await self._async_run_status_command(ip, timeout=15.0)
+
+            if stdout_str is None or returncode is None:
                 return False
-            
-            # Log full output
-            stdout_str = stdout.decode().strip()
-            stderr_str = stderr.decode().strip()
-            _LOGGER.debug(f"Status command stdout: {stdout_str}")
-            _LOGGER.debug(f"Status command stderr: {stderr_str}")
-            
-            if process.returncode != 0:
-                _LOGGER.warning(f"Status check failed with return code {process.returncode}: {stderr_str}")
+
+            if returncode != 0:
+                _LOGGER.warning(f"Status check failed with return code {returncode}: {stderr_str}")
                 return False
                 
             # Check for "idle" state that only shows volume info
@@ -167,9 +227,9 @@ class DeviceManager:
                 _LOGGER.info(f"Device at {ip} is starting to cast media")
                 return True
                 
-            # Check for references to Google Assistant, which means a voice command is being handled
-            if "assistant" in stdout_str.lower():
-                _LOGGER.info(f"Device at {ip} is processing a Google Assistant command")
+            # Check for Google Assistant/timer activity
+            if self._status_indicates_assistant_activity(stdout_str):
+                _LOGGER.info(f"Device at {ip} has Google Assistant activity")
                 return True
                 
             # If we get "Idle" or "Nothing is currently playing", no media is playing
@@ -211,6 +271,23 @@ class DeviceManager:
             # Clear the active check marker
             self.active_checks.pop(check_id, None)
 
+    async def async_is_assistant_active(self, ip, status_output=None):
+        """Check if Google Assistant (timer/alarm/reminder) is active on the device."""
+        # Prefer provided status output
+        if status_output is None:
+            status_output = self._get_cached_status_output(ip)
+
+        if status_output is None:
+            stdout_str, stderr_str, returncode, _ = await self._async_run_status_command(ip, timeout=15.0)
+            if stdout_str is None or returncode is None:
+                return False
+            if returncode != 0:
+                _LOGGER.debug(f"Assistant status check failed with return code {returncode}: {stderr_str}")
+                return False
+            status_output = stdout_str
+
+        return self._status_indicates_assistant_activity(status_output)
+
     async def async_check_device_status(self, ip):
         """Check if a device is still casting our dashboard specifically."""
         # Check if there's already a status check in progress for this device
@@ -237,35 +314,15 @@ class DeviceManager:
         
         try:
             _LOGGER.debug(f"Checking status for device at {ip}")
-            cmd = ['catt', '-d', ip, 'status']
-            _LOGGER.debug(f"Executing command: {' '.join(cmd)}")
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=15.0)
-            except asyncio.TimeoutError:
-                _LOGGER.warning(f"Dashboard status check timed out for {ip}")
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    process.kill()
+            stdout_str, stderr_str, returncode, _ = await self._async_run_status_command(ip, timeout=15.0)
+
+            if stdout_str is None or returncode is None:
                 return False
-            
-            # Log full output
-            stdout_str = stdout.decode().strip()
-            stderr_str = stderr.decode().strip()
-            _LOGGER.debug(f"Status command stdout: {stdout_str}")
-            _LOGGER.debug(f"Status command stderr: {stderr_str}")
-            _LOGGER.debug(f"Status command return code: {process.returncode}")
-            
+
+            _LOGGER.debug(f"Status command return code: {returncode}")
+
             # Parse output to check if it's actually casting our dashboard
-            if process.returncode == 0:
+            if returncode == 0:
                 output = stdout_str
                 
                 # Check for "idle" state that only shows volume info
@@ -294,7 +351,7 @@ class DeviceManager:
                 _LOGGER.debug(f"Device at {ip} is playing something, but not our dashboard")
                 return False
             else:
-                _LOGGER.warning(f"Status check failed with return code {process.returncode}: {stderr_str}")
+                _LOGGER.warning(f"Status check failed with return code {returncode}: {stderr_str}")
                 return False
         except Exception as e:
             _LOGGER.warning(f"Error checking device status at {ip}: {str(e)}")

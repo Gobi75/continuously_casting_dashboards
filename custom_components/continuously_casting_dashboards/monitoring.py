@@ -13,6 +13,7 @@ from .const import (
     EVENT_RECONNECT_SUCCESS, 
     EVENT_RECONNECT_FAILED,
     STATUS_CASTING_IN_PROGRESS,
+    STATUS_ASSISTANT_ACTIVE,
     CONF_SWITCH_ENTITY
 )
 
@@ -259,6 +260,35 @@ class MonitoringManager:
             
             # Check if media is playing before attempting to reconnect
             is_media_playing = await self.device_manager.async_is_media_playing(ip)
+
+            # Check if Google Assistant (timer/alarm/reminder) is active
+            assistant_active = await self.device_manager.async_is_assistant_active(ip)
+            if assistant_active:
+                _LOGGER.info(f"Google Assistant activity detected on {device_name}, pausing dashboard casting")
+
+                if is_casting:
+                    _LOGGER.info(f"Stopping dashboard on {device_name} to allow Assistant UI")
+                    await self.async_stop_casting(ip)
+
+                active_device = self.device_manager.get_active_device(device_key)
+                if active_device:
+                    self.device_manager.update_active_device(
+                        device_key=device_key,
+                        status=STATUS_ASSISTANT_ACTIVE,
+                        last_checked=datetime.now().isoformat()
+                    )
+                else:
+                    self.device_manager.update_active_device(
+                        device_key=device_key,
+                        status=STATUS_ASSISTANT_ACTIVE,
+                        name=device_name,
+                        ip=ip,
+                        first_seen=datetime.now().isoformat(),
+                        last_checked=datetime.now().isoformat(),
+                        reconnect_attempts=0
+                    )
+                return
+
             if is_media_playing:
                 _LOGGER.info(f"Media is currently playing on {device_name}, skipping status check")
                 # Update device status to media_playing

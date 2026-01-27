@@ -5,18 +5,22 @@ import os
 from datetime import datetime
 from homeassistant.core import HomeAssistant
 from .const import (
-    HEALTH_STATS_FILE, 
+    DOMAIN,
+    HEALTH_STATS_FILE,
     STATUS_FILE,
-    EVENT_CONNECTION_ATTEMPT, 
+    EVENT_CONNECTION_ATTEMPT,
     EVENT_CONNECTION_SUCCESS,
-    EVENT_DISCONNECTED, 
+    EVENT_DISCONNECTED,
     EVENT_RECONNECT_ATTEMPT,
-    EVENT_RECONNECT_SUCCESS, 
+    EVENT_RECONNECT_SUCCESS,
     EVENT_RECONNECT_FAILED,
-    STATUS_ASSISTANT_ACTIVE
+    STATUS_ASSISTANT_ACTIVE,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+EVENT_STATUS_UPDATED = f"{DOMAIN}_status_updated"
+
 
 class StatsManager:
     """Class to handle statistics for the integration."""
@@ -27,10 +31,10 @@ class StatsManager:
         self.config = config
         self.health_stats = {}
         self.device_manager = None  # Will be set later
-        
+
         # Ensure directory exists
         os.makedirs('/config/continuously_casting_dashboards', exist_ok=True)
-    
+
     def set_device_manager(self, device_manager):
         """Set the device manager reference."""
         self.device_manager = device_manager
@@ -123,9 +127,13 @@ class StatsManager:
                 os.makedirs('/config/continuously_casting_dashboards', exist_ok=True)
                 with open(STATUS_FILE, 'w') as f:
                     json.dump(status_data, f, indent=2)
-                    
+
             await self.hass.async_add_executor_job(write_status_file)
+
+            # Fire event to refresh sensors
+            self.hass.bus.async_fire(EVENT_STATUS_UPDATED, {"status_data": status_data})
+            _LOGGER.debug("Fired status update event for sensor refresh")
         except Exception as e:
             _LOGGER.error(f"Failed to save status data: {str(e)}")
-            
+
         return status_data

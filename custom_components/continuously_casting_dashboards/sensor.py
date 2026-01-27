@@ -1,518 +1,225 @@
-"""Continuously Cast Dashboards"""
+"""Sensor platform for Continuously Casting Dashboards integration."""
 
-import logging
-import asyncio
-import os
-from datetime import timedelta
-import voluptuous as vol
 import json
+import logging
+import os
+from typing import Any
 
-from homeassistant.core import HomeAssistant
-from homeassistant.const import CONF_DEVICES, CONF_SCAN_INTERVAL
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.config_entries import ConfigEntry, SOURCE_IMPORT
-from homeassistant.helpers.storage import Store
-import homeassistant.helpers.config_validation as cv
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription, EntityCategory
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .casting import CastingManager
-from .device import DeviceManager
-from .monitoring import MonitoringManager
-from .stats import StatsManager
-from .utils import TimeWindowChecker, SwitchEntityChecker
-from .config_flow import async_migrate_entry
-from .const import (
-    DOMAIN,
-    PLATFORMS,
-    CONF_CAST_DELAY,
-    CONF_LOGGING_LEVEL,
-    DEFAULT_CAST_DELAY,
-    DEFAULT_LOGGING_LEVEL,
-    DEFAULT_START_TIME,
-    DEFAULT_END_TIME,
-)
+from .const import DOMAIN, STATUS_FILE
 
 _LOGGER = logging.getLogger(__name__)
 
-# Global lock to prevent concurrent setup of the same entry
-_SETUP_LOCKS = {}
+EVENT_STATUS_UPDATED = f"{DOMAIN}_status_updated"
 
-async def _read_notification_state(hass: HomeAssistant, storage_file: str) -> bool:
-    """Read notification state without blocking the event loop."""
-    def _read():
-        if not os.path.exists(storage_file):
-            return False
-        with open(storage_file, "r") as f:
-            data = json.load(f)
-            return data.get("acknowledged", False)
 
-    try:
-        return await hass.async_add_executor_job(_read)
-    except Exception as ex:
-        _LOGGER.debug("Error loading notification state: %s", ex)
-        return False
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the sensor platform."""
+    _LOGGER.debug("Setting up sensor platform for entry %s", entry.entry_id)
 
-async def _write_notification_state(hass: HomeAssistant, storage_file: str, acknowledged: bool) -> None:
-    """Write notification state without blocking the event loop."""
-    def _write():
-        with open(storage_file, "w") as f:
-            json.dump({"acknowledged": acknowledged}, f)
-
-    try:
-        await hass.async_add_executor_job(_write)
-    except Exception as ex:
-        _LOGGER.debug("Failed to save acknowledged state: %s", ex)
-
-async def _async_forward_entry_setup(hass: HomeAssistant, entry: ConfigEntry, platform: str) -> None:
-    """Forward entry setup using the correct Home Assistant API."""
-    forward_setups = getattr(hass.config_entries, "async_forward_entry_setups", None)
-    if forward_setups:
-        await forward_setups(entry, [platform])
+    # Get the integration instance from hass.data
+    if DOMAIN not in hass.data or entry.entry_id not in hass.data[DOMAIN]:
+        _LOGGER.error("Integration data not found for entry %s", entry.entry_id)
         return
-    await hass.config_entries.async_forward_entry_setup(entry, platform)
 
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Set up the Continuously Cast Dashboards component."""
-    hass.data.setdefault(DOMAIN, {})
+    integration_data = hass.data[DOMAIN][entry.entry_id]
+    caster = integration_data.get("caster")
+    config = integration_data.get("config", {})
 
-    # Simple file-based approach to track notification state
-    storage_file = hass.config.path(f".{DOMAIN}_notification_state.json")
-    _LOGGER.debug(f"Using storage file at: {storage_file}")
-    
-    notification_shown = await _read_notification_state(hass, storage_file)
+    if not caster:
+        _LOGGER.error("Caster instance not found for entry %s", entry.entry_id)
+        return
 
-    if DOMAIN in config:
-        _LOGGER.debug("Found YAML configuration for Continuously Cast Dashboards")
-        
-        # Check if we already have config entries for this domain to avoid conflicts
-        existing_entries = [entry for entry in hass.config_entries.async_entries(DOMAIN)]
-        if existing_entries:
-            _LOGGER.warning("Config entries already exist for %s, skipping YAML import to avoid conflicts", DOMAIN)
-            return True
+    devices = config.get("devices", {})
+    _LOGGER.debug("Found %d devices to create sensors for", len(devices))
 
-        # If notification hasn't been shown yet
-        if not notification_shown:
-            # Create persistent notification
-            notification_id = f"{DOMAIN}_config_imported"
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": "Continuously Cast Dashboards Configuration Imported",
-                    "message": (
-                        "Your YAML configuration for Continuously Cast Dashboards has been imported into the UI configuration.\n\n"
-                        "Please remove the configuration from your configuration.yaml file to avoid conflicts.\n\n"
-                        "You can now manage your configuration through the UI. "
-                        "Click DISMISS to prevent this message from appearing again."
-                    ),
-                    "notification_id": notification_id,
-                },
-            )
-            
-            # Log all events to see what's happening
-            async def log_all_events(event):
-                """Log all events to see what's happening."""
-                # Any event that looks related to notifications
-                if "notification" in event.event_type.lower():
-                    # See if our notification_id appears anywhere in the event data
-                    event_data_str = str(event.data)
-                    if notification_id in event_data_str:
-                        # Save the acknowledged state regardless of the exact event type
-                        await _write_notification_state(hass, storage_file, True)
-            
-            # Listen for ALL events for diagnostic purposes
-            remove_listener = hass.bus.async_listen("*", log_all_events)
-            
-            # Store the listener so it doesn't get garbage collected
-            hass.data[DOMAIN]["remove_listener"] = remove_listener
-            
-            # Also create a one-time task to auto-acknowledge after 5 minutes
-            # as a fallback in case the event system isn't working
-            async def auto_acknowledge():
-                """Automatically acknowledge after a timeout."""
-                import asyncio
-                await asyncio.sleep(300)  # 5 minutes
-                
-                # Check if we've already acknowledged
-                acknowledged = await _read_notification_state(hass, storage_file)
-                if acknowledged:
-                    return  # Already acknowledged, nothing to do
+    entities = []
 
-                # Not acknowledged yet, do it now
-                _LOGGER.debug("Auto-acknowledging notification after timeout")
-                await _write_notification_state(hass, storage_file, True)
-            
-            # Start the auto-acknowledge task
-            hass.async_create_task(auto_acknowledge())
-        else:
-            _LOGGER.debug("Notification was previously acknowledged, skipping")
+    # Create global summary sensors
+    entities.extend([
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "total_devices", "Total Devices"
+        ),
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "connected_devices", "Connected Devices"
+        ),
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "disconnected_devices", "Disconnected Devices"
+        ),
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "media_playing_devices", "Media Playing"
+        ),
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "other_content_devices", "Other Content"
+        ),
+        ContinuouslyCastingSummarySensor(
+            hass, entry, "assistant_active_devices", "Assistant Active"
+        ),
+    ])
 
-        # Forward the YAML config to the config flow
-        hass.async_create_task(
-            hass.config_entries.flow.async_init(
-                DOMAIN,
-                context={"source": SOURCE_IMPORT},
-                data=config[DOMAIN],
-            )
+    # Create a sensor for each device
+    for device_name in devices.keys():
+        entity = ContinuouslyCastingDeviceSensor(hass, entry, device_name)
+        entities.append(entity)
+        _LOGGER.debug("Created sensor for device: %s", device_name)
+
+    if entities:
+        async_add_entities(entities)
+        _LOGGER.info("Added %d sensor entities", len(entities))
+
+        # Listen for status updates to refresh sensors
+        @callback
+        def on_status_update(event):
+            """Refresh all sensors when status is updated."""
+            _LOGGER.debug("Received status update event, refreshing sensors")
+            for entity in entities:
+                hass.async_create_task(entity._async_refresh_and_write())
+
+        # Register the event listener
+        entry.async_on_unload(
+            hass.bus.async_listen(EVENT_STATUS_UPDATED, on_status_update)
         )
+        _LOGGER.debug("Registered status update event listener")
+    else:
+        _LOGGER.warning("No sensor entities to add")
 
-    return True
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities=None) -> bool:
-    """Set up the sensor platform for a config entry."""
-    if async_add_entities is not None:
-        _LOGGER.debug("Sensor platform setup called; no entities to add")
-        return True
-    # Get or create a lock for this specific entry
-    if entry.entry_id not in _SETUP_LOCKS:
-        _SETUP_LOCKS[entry.entry_id] = asyncio.Lock()
-    
-    async with _SETUP_LOCKS[entry.entry_id]:
-        _LOGGER.debug("=== SETUP ENTRY START (LOCKED): %s (ID: %s) ===", entry.title, entry.entry_id)
-        
-        try:
-            # Check if this entry is already set up
-            if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-                existing_data = hass.data[DOMAIN][entry.entry_id]
-                _LOGGER.debug("Entry %s already exists in hass.data: %s", entry.entry_id, existing_data)
-                # If platforms are already set up, we really shouldn't continue
-                if existing_data.get("platforms_setup", False):
-                    _LOGGER.debug("Platforms already set up for entry %s, aborting setup", entry.entry_id)
-                    return True
-                # Also check individual platform flags
-                elif any(hasattr(entry, f"_platform_{platform}_setup") for platform in PLATFORMS):
-                    _LOGGER.debug("Some platforms already have setup flags for entry %s, aborting setup", entry.entry_id)
-                    return True
-                else:
-                    _LOGGER.debug("Entry exists but platforms not set up, cleaning up first")
-                    # Clean up the incomplete setup
-                    if "caster" in existing_data:
-                        await existing_data["caster"].stop()
-                    del hass.data[DOMAIN][entry.entry_id]
-
-            # Register update listener
-            entry.async_on_unload(entry.add_update_listener(async_reload_entry))
-            entry.async_on_unload(entry.add_update_listener(async_migrate_entry))
-            
-            # Merge data from config entry with options
-            config = dict(entry.data)
-            config.update(entry.options)
-            _LOGGER.debug("Merged config: %s", config)
-
-            # Extract configuration with fallback to defaults
-            logging_level = config.get("logging_level", DEFAULT_LOGGING_LEVEL)
-            cast_delay = config.get("cast_delay", DEFAULT_CAST_DELAY)
-            start_time = config.get("start_time", DEFAULT_START_TIME)
-            end_time = config.get("end_time", DEFAULT_END_TIME)
-            devices = config.get("devices", {})
-
-            # Ensure directory exists
-            os.makedirs("/config/continuously_casting_dashboards", exist_ok=True)
-
-            # Set up logging based on config
-            log_level = logging_level.upper()
-            logging.getLogger(__name__).setLevel(getattr(logging, log_level))
-
-            # Set the scan interval from cast_delay
-            config[CONF_SCAN_INTERVAL] = cast_delay
-
-            # Initialize the Continuously Casting Dashboards instance
-            _LOGGER.debug("Creating ContinuouslyCastingDashboards instance")
-            caster = ContinuouslyCastingDashboards(hass, config)
-
-            # Store the caster in domain data with entry_id to support multiple entries
-            hass.data.setdefault(DOMAIN, {})
-            hass.data[DOMAIN][entry.entry_id] = {"caster": caster, "config": config, "platforms_setup": False}
-
-            # Start the caster
-            _LOGGER.debug("Starting caster...")
-            try:
-                # Wait for initialization with a timeout
-                await asyncio.wait_for(caster.start(), timeout=60)  # 60 seconds timeout
-                _LOGGER.debug("Caster initialization completed successfully")
-                
-                # Set up platforms (including sensor platform)
-                _LOGGER.debug("Setting up platforms: %s", PLATFORMS)
-                for platform in PLATFORMS:
-                    try:
-                        # Check if platform is already set up for this entry
-                        if hasattr(entry, f"_platform_{platform}_setup"):
-                            _LOGGER.warning(f"Platform {platform} already marked as set up for entry {entry.entry_id}, skipping")
-                            continue
-                            
-                        await _async_forward_entry_setup(hass, entry, platform)
-                        # Mark this platform as set up
-                        setattr(entry, f"_platform_{platform}_setup", True)
-                        _LOGGER.debug(f"Successfully set up platform {platform}")
-                    except ValueError as e:
-                        if "already been setup" in str(e):
-                            _LOGGER.warning(f"Platform {platform} already set up for entry {entry.entry_id}, continuing")
-                            setattr(entry, f"_platform_{platform}_setup", True)
-                            continue
-                        else:
-                            _LOGGER.error(f"Error setting up platform {platform}: {e}")
-                            raise
-                    except Exception as e:
-                        _LOGGER.error(f"Error setting up platform {platform}: {e}")
-                        raise
-                
-                hass.data[DOMAIN][entry.entry_id]["platforms_setup"] = True
-                _LOGGER.debug("Platforms setup completed")
-                
-                _LOGGER.info("Entry %s setup completed successfully", entry.entry_id)
-                return True
-                
-            except asyncio.TimeoutError:
-                _LOGGER.error("Initialization timed out for entry %s", entry.entry_id)
-                # Clean up on timeout
-                if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-                    del hass.data[DOMAIN][entry.entry_id]
-                return False
-                
-            except Exception as e:
-                _LOGGER.error("Error in async_setup_entry: %s", str(e), exc_info=True)
-                # Clean up on error
-                if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-                    del hass.data[DOMAIN][entry.entry_id]
-                raise
-                
-        finally:
-            _LOGGER.debug("=== SETUP ENTRY END: %s ===", entry.entry_id)
-
-async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Comprehensive entry reload mechanism."""
-    _LOGGER.info(f"Reloading entry {entry.entry_id}")
-    
+def _read_status_data() -> dict:
+    """Read status data from file (synchronous, run in executor)."""
     try:
-        # 1. Merge current data and options
-        config = dict(entry.data)
-        config.update(entry.options)
-        _LOGGER.debug(f"Reloading with config: {config}")
-        _LOGGER.debug(f"Options before reload: {entry.options}")
+        if not os.path.exists(STATUS_FILE):
+            return {}
 
-        # 2. Stop existing integration instance and unload platforms
-        if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-            current_instance = hass.data[DOMAIN][entry.entry_id].get("caster")
-            if current_instance:
-                await current_instance.stop()
-            
-            # Unload all platforms first and clear platform flags
-            for platform in PLATFORMS:
-                try:
-                    await hass.config_entries.async_forward_entry_unload(entry, platform)
-                    # Clear the platform setup flag
-                    if hasattr(entry, f"_platform_{platform}_setup"):
-                        delattr(entry, f"_platform_{platform}_setup")
-                    _LOGGER.debug(f"Unloaded platform {platform}")
-                except Exception as e:
-                    _LOGGER.warning(f"Error unloading platform {platform}: {e}")
-                    # Clear the flag anyway to allow retry
-                    if hasattr(entry, f"_platform_{platform}_setup"):
-                        delattr(entry, f"_platform_{platform}_setup")
+        with open(STATUS_FILE, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        _LOGGER.debug("Error reading status file: %s", e)
+        return {}
 
-            # Remove the current entry data
-            del hass.data[DOMAIN][entry.entry_id]
 
-        # 3. Create and start new instance
-        new_instance = ContinuouslyCastingDashboards(hass, config)
-        hass.data.setdefault(DOMAIN, {})
-        hass.data[DOMAIN][entry.entry_id] = {
-            "caster": new_instance, 
-            "config": config,
-            "platforms_setup": False  # Reset platform setup flag
+class ContinuouslyCastingSensorBase(SensorEntity):
+    """Base class for Continuously Casting Dashboards sensors."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry):
+        """Initialize the sensor base."""
+        self.hass = hass
+        self.entry = entry
+        self._status_data = {}
+
+    def _refresh_data(self):
+        """Schedule a refresh of the status data without blocking."""
+        async def _do_refresh():
+            try:
+                self._status_data = await self.hass.async_add_executor_job(_read_status_data)
+            except Exception as e:
+                _LOGGER.debug("Error refreshing status data: %s", e)
+
+        self.hass.async_create_task(_do_refresh())
+
+    async def async_added_to_hass(self) -> None:
+        """Fetch initial data when entity is added."""
+        await self._async_refresh_and_write()
+
+    async def _async_refresh_and_write(self) -> None:
+        """Refresh data in executor and write state."""
+        try:
+            self._status_data = await self.hass.async_add_executor_job(_read_status_data)
+        except Exception as e:
+            _LOGGER.debug("Error refreshing status data: %s", e)
+        self.async_write_ha_state()
+
+    async def async_update(self) -> None:
+        """Update the sensor state."""
+        await self._async_refresh_and_write()
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, self.entry.entry_id)},
+            "name": "Continuously Casting Dashboards",
+            "manufacturer": "Continuously Casting Dashboards",
+            "model": "Integration",
         }
 
-        # Start the new instance
-        try:
-            await asyncio.wait_for(new_instance.start(), timeout=60)
-            
-            # 4. Set up platforms fresh
-            _LOGGER.debug("Setting up platforms after reload")
-            for platform in PLATFORMS:
-                try:
-                    # Check if platform is already set up for this entry
-                    if hasattr(entry, f"_platform_{platform}_setup"):
-                        _LOGGER.warning(f"Platform {platform} already marked as set up after reload for entry {entry.entry_id}, skipping")
-                        continue
-                        
-                    await _async_forward_entry_setup(hass, entry, platform)
-                    # Mark this platform as set up
-                    setattr(entry, f"_platform_{platform}_setup", True)
-                    _LOGGER.debug(f"Successfully set up platform {platform}")
-                except ValueError as e:
-                    if "already been setup" in str(e):
-                        _LOGGER.warning(f"Platform {platform} already set up for entry {entry.entry_id} after reload, continuing")
-                        setattr(entry, f"_platform_{platform}_setup", True)
-                        continue
-                    else:
-                        _LOGGER.error(f"Error setting up platform {platform}: {e}")
-                        raise
-                except Exception as e:
-                    _LOGGER.error(f"Error setting up platform {platform}: {e}")
-                    raise
-            
-            hass.data[DOMAIN][entry.entry_id]["platforms_setup"] = True
-            _LOGGER.info(f"Successfully reloaded integration for entry {entry.entry_id}")
-            _LOGGER.debug(f"Options after reload: {entry.options}")
-        except asyncio.TimeoutError:
-            _LOGGER.error(f"Reload timed out for entry {entry.entry_id}")
-            if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-                del hass.data[DOMAIN][entry.entry_id]
-            raise
-        except Exception as e:
-            _LOGGER.error(f"Error during reload: {str(e)}", exc_info=True)
-            if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-                del hass.data[DOMAIN][entry.entry_id]
-            raise
-    except Exception as ex:
-        _LOGGER.error(f"Reload failed: {ex}")
-        _LOGGER.exception("Detailed reload failure traceback:")
-        raise
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    _LOGGER.info("Unloading entry %s", entry.entry_id)
-
-    try:
-        # Unload all platforms first
-        for platform in PLATFORMS:
-            try:
-                await hass.config_entries.async_forward_entry_unload(entry, platform)
-                # Clear the platform setup flag
-                if hasattr(entry, f"_platform_{platform}_setup"):
-                    delattr(entry, f"_platform_{platform}_setup")
-                _LOGGER.debug(f"Unloaded platform {platform}")
-            except Exception as e:
-                _LOGGER.warning(f"Error unloading platform {platform}: {e}")
-                # Clear the flag anyway
-                if hasattr(entry, f"_platform_{platform}_setup"):
-                    delattr(entry, f"_platform_{platform}_setup")
-
-        # Stop the existing caster if it exists
-        if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-            caster = hass.data[DOMAIN][entry.entry_id]["caster"]
-            await caster.stop()
-
-            # Remove the entry from domain data
-            del hass.data[DOMAIN][entry.entry_id]
-
-        # Clean up the setup lock for this entry
-        if entry.entry_id in _SETUP_LOCKS:
-            del _SETUP_LOCKS[entry.entry_id]
-
-        return True
-    except Exception as ex:
-        _LOGGER.error(f"Error unloading entry: {ex}")
+    @property
+    def should_poll(self) -> bool:
+        """Return False as we push updates."""
         return False
 
 
-class ContinuouslyCastingDashboards:
-    """Class to handle casting dashboards to Chromecast devices."""
+class ContinuouslyCastingSummarySensor(ContinuouslyCastingSensorBase):
+    """Sensor for global summary statistics."""
 
-    def __init__(self, hass: HomeAssistant, config: dict):
-        """Initialize the dashboard caster."""
-        _LOGGER.debug(f"Initializing with config: {config}")
-        _LOGGER.debug(f"Devices from config: {config.get('devices', {})}")
-        self.hass = hass
-        self.config = config
-        self.running = True
-        self.started = False  # Add flag to prevent multiple starts
-        self.unsubscribe_listeners = []
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, sensor_type: str, friendly_name: str):
+        """Initialize the summary sensor."""
+        super().__init__(hass, entry)
+        self._sensor_type = sensor_type
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{sensor_type}"
+        self._attr_has_entity_name = True
+        self._attr_name = friendly_name
+        self._refresh_data()
 
-        # Initialize managers
-        self.device_manager = DeviceManager(hass, config)
-        self.time_window_checker = TimeWindowChecker(config)
-        self.switch_checker = SwitchEntityChecker(hass, config)
-        self.casting_manager = CastingManager(hass, config, self.device_manager)
-        self.monitoring_manager = MonitoringManager(
-            hass,
-            config,
-            self.device_manager,
-            self.casting_manager,
-            self.time_window_checker,
-            self.switch_checker,
-        )
-        self.stats_manager = StatsManager(hass, config)
+    @property
+    def native_value(self) -> int | None:
+        """Return the state of the sensor."""
+        return self._status_data.get(self._sensor_type)
 
-        # Share components between managers
-        self.monitoring_manager.set_stats_manager(self.stats_manager)
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional state attributes."""
+        if not self._status_data:
+            return None
 
-    async def start(self):
-        """Start the casting process."""
-        if self.started:
-            _LOGGER.warning("ContinuouslyCastingDashboards already started, skipping duplicate start")
-            return True
-            
-        _LOGGER.info("Starting Continuously Casting Dashboards integration - Instance ID: %s", id(self))
-        self.started = True
+        return {
+            "last_updated": self._status_data.get("last_updated"),
+        }
 
-        try:
-            # Initial setup of devices - each device may take a while to discover
-            _LOGGER.debug("Starting device initialization")
-            try:
-                await asyncio.wait_for(
-                    self.monitoring_manager.initialize_devices(),
-                    timeout=45,  # 45 second timeout for initial device setup
-                )
-                _LOGGER.debug("Device initialization completed successfully")
-            except asyncio.TimeoutError:
-                _LOGGER.warning("Device initialization timed out, continuing with setup")
-            except Exception as e:
-                _LOGGER.error("Error during device initialization: %s", str(e), exc_info=True)
-                raise
 
-            # Set up recurring monitoring
-            _LOGGER.debug("Setting up recurring monitoring - Scan interval: %s seconds", self.config.get(CONF_SCAN_INTERVAL, 30))
-            scan_interval = self.config.get(CONF_SCAN_INTERVAL, 30)
-            recurring_listener = async_track_time_interval(
-                self.hass,
-                self.monitoring_manager.async_monitor_devices,
-                timedelta(seconds=scan_interval),
-            )
-            self.unsubscribe_listeners.append(recurring_listener)
-            _LOGGER.debug("Recurring monitoring listener created: %s", id(recurring_listener))
+class ContinuouslyCastingDeviceSensor(ContinuouslyCastingSensorBase):
+    """Sensor for individual device status."""
 
-            # Generate initial status
-            _LOGGER.debug("Generating initial status")
-            try:
-                await self.stats_manager.async_generate_status_data()
-                _LOGGER.debug("Initial status generation completed")
-            except Exception as e:
-                _LOGGER.error("Error generating initial status: %s", str(e), exc_info=True)
-                raise
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, device_name: str):
+        """Initialize the device sensor."""
+        super().__init__(hass, entry)
+        self._device_name = device_name
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_{device_name.replace(' ', '_').lower()}_status"
+        self._attr_has_entity_name = True
+        self._attr_name = f"{device_name} Status"
+        self._refresh_data()
 
-            # Schedule regular status updates
-            _LOGGER.debug("Setting up regular status updates")
-            status_listener = async_track_time_interval(
-                self.hass,
-                self.stats_manager.async_generate_status_data,
-                timedelta(minutes=5),
-            )
-            self.unsubscribe_listeners.append(status_listener)
-            _LOGGER.debug("Status update listener created: %s", id(status_listener))
+    @property
+    def native_value(self) -> str | None:
+        """Return the state of the sensor."""
+        devices = self._status_data.get("devices", {})
+        device_info = devices.get(self._device_name)
+        if device_info:
+            return device_info.get("status", "unknown")
+        return "unknown"
 
-            # Trigger an immediate monitoring run in a separate task
-            _LOGGER.debug("Triggering immediate monitoring run - Task will be created")
-            monitoring_task = self.hass.async_create_task(self.monitoring_manager.async_monitor_devices(None))
-            _LOGGER.debug("Immediate monitoring task created: %s", id(monitoring_task))
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return additional state attributes."""
+        devices = self._status_data.get("devices", {})
+        device_info = devices.get(self._device_name)
+        if device_info:
+            return {
+                "ip": device_info.get("ip", "Unknown"),
+                "last_checked": device_info.get("last_checked", ""),
+                "reconnect_attempts": device_info.get("reconnect_attempts", 0),
+                "device_name": self._device_name,
+            }
+        return None
 
-            # Mark initialization as complete
-            _LOGGER.info("Continuously Casting Dashboards initialization complete - Total listeners: %s", len(self.unsubscribe_listeners))
-            return True
-        except Exception as e:
-            _LOGGER.error("Error in start(): %s", str(e), exc_info=True)
-            raise
-
-    async def stop(self):
-        """Stop the casting process."""
-        _LOGGER.info("Stopping Continuously Casting Dashboards integration")
-        self.running = False
-        self.started = False  # Reset the started flag
-
-        # Unsubscribe from all listeners
-        for unsubscribe in self.unsubscribe_listeners:
-            unsubscribe()
-        
-        # Clear the listeners list
-        self.unsubscribe_listeners.clear()
-
-        return True
+    @property
+    def entity_category(self) -> EntityCategory | None:
+        """Return the entity category."""
+        return EntityCategory.DIAGNOSTIC

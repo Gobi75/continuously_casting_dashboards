@@ -92,9 +92,16 @@ The integration will start casting your dashboard during the configured time win
 
 ### UI Configuration (Recommended)
 
-All settings can be managed through **Settings** → **Devices & Services** → **Continuously Casting Dashboards** → **Configure**.
+All settings can be managed through **Settings** → **Devices & Services** → **Continuously Casting Dashboards**.
 
-### YAML Configuration
+**Managing device dashboards**
+- Click **Configure** on a device to edit its dashboard settings in a single form.
+- To add another dashboard, enable **“Add another dashboard after saving”**.
+- If a device has multiple dashboards, use **“Edit a different dashboard”** to switch which one you’re editing.
+
+### YAML Configuration (Legacy)
+
+> **Note:** UI configuration is now the recommended method. YAML configuration is supported for backward compatibility but new features may only be available in the UI.
 
 Add to your `configuration.yaml`:
 
@@ -233,6 +240,40 @@ data:
 - `set_end_time` - End time (HH:MM)
 - `set_switch_entity` - Global control entity
 - `set_switch_state` - State that enables casting
+
+---
+
+## 🔄 Migrating from YAML to UI
+
+If you're currently using YAML configuration (`configuration.yaml`), follow these steps to migrate to the new UI-based configuration:
+
+### Automatic Migration
+
+1. **Update the integration** via HACS
+2. **Restart Home Assistant**
+3. Your YAML config will be **automatically imported** into the UI
+4. A notification will appear confirming the import
+5. **Remove** the `continuously_casting_dashboards:` section from your `configuration.yaml`
+6. Restart Home Assistant again
+
+Your devices will continue working. You can now manage everything through the UI.
+
+### After Migration
+
+Once migrated, each device appears separately on the integration page:
+
+```
+Settings → Devices & Services → Continuously Casting Dashboards
+├── ⚙️ Configure (Global Settings)
+├── 📱 Living Room Display → Configure
+├── 📱 Kitchen Hub → Configure
+└── ➕ Add Device
+```
+
+Click **Configure** on any device to manage its dashboards individually.
+Use **“Add another dashboard after saving”** to add more dashboards for a device, and **“Edit a different dashboard”** when multiple dashboards exist.
+
+> **Important:** After migration, remove the YAML configuration to avoid conflicts. The integration will show a warning if YAML config is detected alongside UI config.
 
 ---
 

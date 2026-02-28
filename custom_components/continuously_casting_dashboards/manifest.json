@@ -1,10 +1,10 @@
 {
     "domain": "continuously_casting_dashboards",
-    "name": "Continuously Cast Dashboards",
-    "documentation": "https://github.com/b0mbays/continuously_casting_dashboards",
+    "name": "Continuously Cast Dashboards (Fork)",
+    "documentation": "https://github.com/Gobi75/continuously_casting_dashboards",
     "requirements": ["catt==0.12.13"],
-    "version": "2.0.9",
+    "version": "2.1.0",
     "config_flow": true,
     "dependencies": [],
-    "codeowners": ["@b0mbays"]
+    "codeowners": ["Gobi75"]
   }

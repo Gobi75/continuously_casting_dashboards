@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <strong>Keep your Home Assistant dashboards always visible on Chromecast displays</strong>
+  <strong>Keep your Home Assistant dashboards always visible on Chromecast displays (Fixed for Nest Hub 2)</strong>
 </p>
 
 <p align="center">

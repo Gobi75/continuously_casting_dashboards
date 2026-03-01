@@ -8,9 +8,6 @@
                 "data": {
                     "logging_level": "Logging Level",
                     "cast_delay": "Cast Delay (seconds)",
-                    "scan_interval": "Scan Interval (seconds)",
-                    "max_retries": "Max Retries",
-                    "casting_timeout": "Casting Timeout",
                     "start_time": "Default Start Time",
                     "end_time": "Default End Time",
                     "include_entity": "Control casting with an entity",
@@ -19,9 +16,6 @@
                 },
                 "data_description": {
                     "cast_delay": "How often to check each device (5-300 seconds)",
-                    "scan_interval": "How often to refresh device status",
-                    "max_retries": "Number of reconnection attempts",
-                    "casting_timeout": "Seconds to wait for Chromecast response",
                     "switch_entity_id": "Entity that enables/disables all casting",
                     "switch_entity_state": "State that enables casting. Leave blank for defaults (on, true, home, open)"
                 }
@@ -48,9 +42,6 @@
                 "data": {
                     "logging_level": "Logging Level",
                     "cast_delay": "Cast Delay (seconds)",
-                    "scan_interval": "Scan Interval (seconds)",
-                    "max_retries": "Max Retries",
-                    "casting_timeout": "Casting Timeout",
                     "start_time": "Default Start Time",
                     "end_time": "Default End Time",
                     "include_entity": "Control casting with an entity",
@@ -59,9 +50,6 @@
                 },
                 "data_description": {
                     "cast_delay": "How often to check each device (5-300 seconds)",
-                    "scan_interval": "How often to refresh device status",
-                    "max_retries": "Number of reconnection attempts",
-                    "casting_timeout": "Seconds to wait for Chromecast response",
                     "switch_entity_id": "Entity that enables/disables all casting",
                     "switch_entity_state": "State that enables casting. Leave blank for defaults"
                 }

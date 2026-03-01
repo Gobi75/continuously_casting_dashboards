@@ -2,7 +2,7 @@
     "domain": "continuously_casting_dashboards",
     "name": "Continuously Cast Dashboards (Fork)",
     "documentation": "https://github.com/Gobi75/continuously_casting_dashboards",
-    "requirements": ["catt==0.12.13"],
+    "requirements": ["catt==0.13.1"],
     "version": "2.1.0",
     "config_flow": true,
     "dependencies": [],

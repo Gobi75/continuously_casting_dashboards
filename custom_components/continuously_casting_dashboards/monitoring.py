@@ -14,7 +14,10 @@ from .const import (
     EVENT_RECONNECT_FAILED,
     STATUS_CASTING_IN_PROGRESS,
     STATUS_ASSISTANT_ACTIVE,
-    CONF_SWITCH_ENTITY
+    CONF_SWITCH_ENTITY,
+    DEFAULT_SCAN_INTERVAL,       # Dodaj to
+    DEFAULT_MAX_RETRIES,        # Dodaj to
+    DEFAULT_CASTING_TIMEOUT     # Dodaj to
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +38,10 @@ class MonitoringManager:
         self.stats_manager = None  # Will be set later
         self.devices = config.get(CONF_DEVICES, {})
         self.cast_delay = config.get('cast_delay', 0)
+        # Nowe parametry pobrane z konfiguracji integracji
+        self.scan_interval = config.get('scan_interval', DEFAULT_SCAN_INTERVAL)
+        self.max_retries = config.get('max_retries', DEFAULT_MAX_RETRIES)
+        self.casting_timeout = config.get('casting_timeout', DEFAULT_CASTING_TIMEOUT)
         self.active_device_configs = {}  # Track which dashboard config is active for each device
         self.monitor_lock = asyncio.Lock()  # Lock to prevent monitoring cycle overlap
         
@@ -324,7 +331,7 @@ class MonitoringManager:
             
             try:
                 # Add timeout to prevent hanging
-                status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=10.0)
+                status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=float(self.casting_timeout))
                 status_output = status_stdout.decode().strip()
                 
                 # If only volume info is returned, device is truly idle
@@ -421,14 +428,18 @@ class MonitoringManager:
                     else:
                         self.device_manager.update_active_device(device_key, 'connected', last_checked=datetime.now().isoformat())
                 elif is_idle:
-                    # Device is idle, should show our dashboard
-                    # Add a delay after any status change to prevent rapid reconnects
-                    # This gives voice commands time to be processed
-                    min_time_between_reconnects = 30  # seconds
+                    # Sprawdzamy, czy to Backdrop (identyfikator E8C28D3C)
+                    is_backdrop = "E8C28D3C" in status_output or "backdrop" in status_output.lower()
+                    
+                    # DYNAMICZNY CZAS: 2s dla Backdropa, 30s dla innych stanów bezczynności
+                    min_time_between_reconnects = 2 if is_backdrop else 30
+                    
                     time_since_last_change = current_time - last_status_change
                     
                     if previous_status != 'disconnected':
-                        _LOGGER.info(f"Device {device_name} ({ip}) is idle and not casting our dashboard")
+                        log_msg = "Backdrop detected - fast reconnect enabled" if is_backdrop else "idle and not casting"
+                        _LOGGER.info(f"Device {device_name} ({ip}) is {log_msg}")
+                        
                         self.device_manager.update_active_device(
                             device_key=device_key, 
                             status='disconnected', 
@@ -436,12 +447,12 @@ class MonitoringManager:
                             last_checked=datetime.now().isoformat()
                         )
                     else:
-                        # Only attempt to reconnect if enough time has passed since last status change
+                        # Reconnect nastąpi niemal natychmiast po wykryciu Backdropa
                         if time_since_last_change > min_time_between_reconnects:
-                            _LOGGER.info(f"Device {device_name} ({ip}) is still idle after waiting period, attempting reconnect")
+                            _LOGGER.info(f"Device {device_name} ({ip}) reconnecting (delay: {min_time_between_reconnects}s)")
                             await self.async_reconnect_device(device_name, ip, current_config)
                         else:
-                            _LOGGER.debug(f"Device {device_name} ({ip}) is idle but waiting {int(min_time_between_reconnects - time_since_last_change)}s before reconnecting")
+                            _LOGGER.debug(f"Device {device_name} ({ip}) waiting {int(min_time_between_reconnects - time_since_last_change)}s")
                             self.device_manager.update_active_device(device_key, 'disconnected', last_checked=datetime.now().isoformat())
                 else:
                     # Device has other content
@@ -882,15 +893,15 @@ class MonitoringManager:
             attempts = active_device.get('reconnect_attempts', 0) + 1
             self.device_manager.update_active_device(device_key, active_device.get('status'), reconnect_attempts=attempts)
             
-            # If too many reconnect attempts, back off
-            if attempts > 10:
+            # Używamy self.max_retries zamiast sztywnego 10
+            if attempts > self.max_retries:
                 _LOGGER.warning(f"Device {device_name} ({ip}) has had {attempts} reconnect attempts, backing off")
                 if self.stats_manager:
                     await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
                 return False
         
-        # Check status one more time to see if it's truly idle
-        cmd = ['catt', '-d', ip, 'status']
+        # Check status one more time to see if it's truly idle or just Backdrop
+        cmd = ['catt', '-d', ip, 'info']
         try:
             status_process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -898,16 +909,19 @@ class MonitoringManager:
                 stderr=asyncio.subprocess.PIPE
             )
             
-            status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=10.0)
+            status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=float(self.casting_timeout))
             status_output = status_stdout.decode().strip()
             
-            # If device isn't idle (has more than just volume info), don't attempt to cast
-            if len(status_output.splitlines()) > 2 or not all(line.startswith("Volume") for line in status_output.splitlines()):
-                if "Dummy" not in status_output and "8123" not in status_output:
-                    _LOGGER.info(f"Device {device_name} ({ip}) shows non-idle status, skipping reconnect")
-                    if active_device:
-                        self.device_manager.update_active_device(device_key, 'other_content')
-                    return False
+            # Sprawdzamy, czy to Backdrop (E8C28D3C) lub nasz DashCast (84912283)
+            is_safe_to_recast = any(id in status_output for id in ["E8C28D3C", "84912283", "8123"])
+            
+            # Jeśli to NIE jest bezpieczny stan (czyli np. Netflix/YouTube) i mamy dużo linii statusu
+            if not is_safe_to_recast and len(status_output.splitlines()) > 5:
+                _LOGGER.info(f"Device {device_name} ({ip}) shows non-idle status (other content), skipping reconnect")
+                if active_device:
+                    self.device_manager.update_active_device(device_key, 'other_content')
+                return False
+                
         except asyncio.TimeoutError:
             _LOGGER.warning(f"Status check timed out for {device_name} ({ip})")
             status_process.terminate()
@@ -915,7 +929,6 @@ class MonitoringManager:
                 await asyncio.wait_for(status_process.wait(), timeout=5.0)
             except asyncio.TimeoutError:
                 status_process.kill()
-            # Skip reconnect if we can't determine status
             return False
         except Exception as e:
             _LOGGER.error(f"Error checking status before reconnect: {str(e)}")

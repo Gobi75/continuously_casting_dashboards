@@ -20,6 +20,11 @@ import homeassistant.helpers.config_validation as cv
 from .const import (
     DOMAIN,
     DEFAULT_CAST_DELAY,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_RETRY_DELAY,
+    DEFAULT_VERIFICATION_WAIT_TIME,
+    DEFAULT_CASTING_TIMEOUT,
     DEFAULT_LOGGING_LEVEL,
     DEFAULT_START_TIME,
     DEFAULT_END_TIME,
@@ -88,7 +93,7 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
             try:
                 cleaned_input = {}
 
-                for key in ["logging_level", "cast_delay", "start_time", "end_time"]:
+                for key in ["logging_level", "cast_delay", "start_time", "end_time", "scan_interval", "max_retries", "casting_timeout"]:
                     if key in user_input and user_input[key] is not None:
                         cleaned_input[key] = user_input[key]
 
@@ -117,7 +122,7 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
         schema = vol.Schema(
             {
                 vol.Required(
-                    "logging_level", default=DEFAULT_LOGGING_LEVEL
+                    "logging_level", default=self.config_entry.options.get("logging_level", DEFAULT_LOGGING_LEVEL)
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
@@ -130,18 +135,30 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Required("cast_delay", default=DEFAULT_CAST_DELAY): vol.All(
-                    vol.Coerce(int), vol.Range(min=5, max=300)
+                vol.Required("cast_delay", default=self.config_entry.options.get("cast_delay", DEFAULT_CAST_DELAY)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=5, max=300, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required("scan_interval", default=self.config_entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=5, max=3600, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required("max_retries", default=self.config_entry.options.get("max_retries", DEFAULT_MAX_RETRIES)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=20, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required("retry_delay", default=self.config_entry.options.get("retry_delay", DEFAULT_RETRY_DELAY)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required("casting_timeout", default=self.config_entry.options.get("casting_timeout", DEFAULT_CASTING_TIMEOUT)): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=300, mode=selector.NumberSelectorMode.BOX)
                 ),
                 vol.Optional(
-                    "start_time", default=DEFAULT_START_TIME
+                    "start_time", default=self.config_entry.options.get("start_time", DEFAULT_START_TIME)
                 ): selector.TimeSelector(),
                 vol.Optional(
-                    "end_time", default=DEFAULT_END_TIME
+                    "end_time", default=self.config_entry.options.get("end_time", DEFAULT_END_TIME)
                 ): selector.TimeSelector(),
-                vol.Optional("include_entity", default=False): cv.boolean,
-                vol.Optional("switch_entity_id", default=""): cv.string,
-                vol.Optional("switch_entity_state", default=""): cv.string,
+                vol.Optional("include_entity", default=self.config_entry.options.get("include_entity", False)): cv.boolean,
+                vol.Optional("switch_entity_id", default=self.config_entry.options.get("switch_entity_id", "")): cv.string,
+                vol.Optional("switch_entity_state", default=self.config_entry.options.get("switch_entity_state", "")): cv.string,
             }
         )
 
@@ -161,6 +178,10 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
         data = {
             "logging_level": import_config.get("logging_level", DEFAULT_LOGGING_LEVEL),
             "cast_delay": import_config.get("cast_delay", DEFAULT_CAST_DELAY),
+            "scan_interval": import_config.get("scan_interval", DEFAULT_SCAN_INTERVAL),
+            "max_retries": import_config.get("max_retries", DEFAULT_MAX_RETRIES),
+            "retry_delay": import_config.get("retry_delay", DEFAULT_RETRY_DELAY),
+            "casting_timeout": import_config.get("casting_timeout", DEFAULT_CASTING_TIMEOUT),
             "start_time": import_config.get("start_time", DEFAULT_START_TIME),
             "end_time": import_config.get("end_time", DEFAULT_END_TIME),
         }
@@ -203,7 +224,7 @@ class GlobalSettingsOptionsFlow(config_entries.OptionsFlow):
             try:
                 cleaned_input = {}
 
-                for key in ["logging_level", "cast_delay", "start_time", "end_time"]:
+                for key in ["logging_level", "cast_delay", "start_time", "end_time", "scan_interval", "max_retries", "casting_timeout"]:
                     if key in user_input and user_input[key] is not None:
                         cleaned_input[key] = user_input[key]
 
@@ -258,7 +279,27 @@ class GlobalSettingsOptionsFlow(config_entries.OptionsFlow):
                 vol.Required(
                     "cast_delay",
                     default=self._config.get("cast_delay", DEFAULT_CAST_DELAY),
-                ): vol.All(vol.Coerce(int), vol.Range(min=5, max=300)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=5, max=300, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required(
+                    "scan_interval",
+                    default=self._config.get("scan_interval", DEFAULT_SCAN_INTERVAL),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=5, max=3600, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required(
+                    "max_retries",
+                    default=self._config.get("max_retries", DEFAULT_MAX_RETRIES),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=1, max=20, mode=selector.NumberSelectorMode.BOX)
+                ),
+                vol.Required(
+                    "casting_timeout",
+                    default=self._config.get("casting_timeout", DEFAULT_CASTING_TIMEOUT),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(min=10, max=300, mode=selector.NumberSelectorMode.BOX)
+                ),
                 vol.Optional(
                     "start_time",
                     default=self._config.get("start_time", DEFAULT_START_TIME),

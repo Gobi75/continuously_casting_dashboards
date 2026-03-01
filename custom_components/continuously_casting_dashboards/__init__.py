@@ -30,6 +30,10 @@ from .const import (
     DEFAULT_LOGGING_LEVEL,
     DEFAULT_START_TIME,
     DEFAULT_END_TIME,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_CASTING_TIMEOUT,
+    DEFAULT_RETRY_DELAY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -417,12 +421,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             start_time = config.get("start_time", DEFAULT_START_TIME)
             end_time = config.get("end_time", DEFAULT_END_TIME)
 
+            # Pobieranie nowych parametrów z użyciem stałych z const.py
+            scan_interval = int(config.get("scan_interval", DEFAULT_SCAN_INTERVAL))
+            max_retries = int(config.get("max_retries", DEFAULT_MAX_RETRIES))
+            casting_timeout = float(config.get("casting_timeout", DEFAULT_CASTING_TIMEOUT))
+            # Pobieranie retry_delay z configu (z rzutowaniem na int)
+            retry_delay = int(config.get("retry_delay", DEFAULT_RETRY_DELAY))
+
             # Ensure directory exists
             os.makedirs("/config/continuously_casting_dashboards", exist_ok=True)
 
             # Set up logging based on config
             log_level = logging_level.upper()
             logging.getLogger(__name__).setLevel(getattr(logging, log_level))
+
+            # Nadpisanie scan_interval w słowniku config, aby reszta managerów go widziała
+            config["scan_interval"] = scan_interval
+            config["max_retries"] = max_retries
+            config["casting_timeout"] = casting_timeout
+            config["retry_delay"] = retry_delay
 
             # Set the scan interval from cast_delay
             config[CONF_SCAN_INTERVAL] = cast_delay
@@ -673,7 +690,7 @@ class ContinuouslyCastingDashboards:
             try:
                 await asyncio.wait_for(
                     self.monitoring_manager.initialize_devices(),
-                    timeout=45,  # 45 second timeout for initial device setup
+                    timeout=90,  # 90 second timeout for initial device setup
                 )
                 _LOGGER.info("Background device initialization completed successfully")
             except asyncio.TimeoutError:

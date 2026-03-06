@@ -431,6 +431,10 @@ class MonitoringManager:
                     # Sprawdzamy, czy to Backdrop (identyfikator E8C28D3C)
                     is_backdrop = "E8C28D3C" in status_output or "backdrop" in status_output.lower()
                     
+                    # RESETUJEMY LICZNIK, jeśli widzimy Backdrop - to nie jest błąd!
+                    if is_backdrop:
+                        self.device_manager.update_active_device(device_key, previous_status, reconnect_attempts=0)
+                    
                     # DYNAMICZNY CZAS: 2s dla Backdropa, 30s dla innych stanów bezczynności
                     min_time_between_reconnects = 2 if is_backdrop else 30
                     
@@ -854,7 +858,7 @@ class MonitoringManager:
         """Attempt to reconnect a disconnected device."""
         device_key = f"{device_name}_{ip}"
         
-        # Check if a cast is already in progress
+        # BLOK 1: Sprawdzenie trwającego castingu
         if ip in self.casting_manager.active_casting_operations:
             _LOGGER.info(f"Casting already in progress for {device_name} ({ip}), skipping reconnect")
             self.device_manager.update_active_device(
@@ -864,12 +868,12 @@ class MonitoringManager:
             )
             return False
         
-        # Skip if outside time window
+        # BLOK 2: Okno czasowe
         if not await self.time_window_checker.async_is_within_time_window(device_name, device_config):
             _LOGGER.info(f"Outside casting time window for {device_name}, skipping reconnect")
             return False
         
-        # Check if the device is part of an active speaker group
+        # BLOK 3: Grupy głośników
         speaker_groups = device_config.get('speaker_groups')
         if speaker_groups:
             if await self.device_manager.async_check_speaker_group_state(ip, speaker_groups):
@@ -879,7 +883,7 @@ class MonitoringManager:
                     self.device_manager.update_active_device(device_key, 'speaker_group_active')
                 return False
         
-        # Check if media is playing before attempting to reconnect
+        # BLOK 4: Sprawdzenie odtwarzania mediów (podstawowe)
         if await self.device_manager.async_is_media_playing(ip):
             _LOGGER.info(f"Media is currently playing on {device_name}, skipping reconnect")
             active_device = self.device_manager.get_active_device(device_key)
@@ -887,35 +891,40 @@ class MonitoringManager:
                 self.device_manager.update_active_device(device_key, 'media_playing')
             return False
         
-        # Increment reconnect attempts
+        # BLOK 5: Zarządzanie licznikami i Backing off
         active_device = self.device_manager.get_active_device(device_key)
         if active_device:
             attempts = active_device.get('reconnect_attempts', 0) + 1
             self.device_manager.update_active_device(device_key, active_device.get('status'), reconnect_attempts=attempts)
             
-            # Używamy self.max_retries zamiast sztywnego 10
             if attempts > self.max_retries:
                 _LOGGER.warning(f"Device {device_name} ({ip}) has had {attempts} reconnect attempts, backing off")
                 if self.stats_manager:
                     await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
                 return False
         
-        # Check status one more time to see if it's truly idle or just Backdrop
+        # BLOK 6: Diagnostyka CATT (Dodano reset licznika dla Backdrop/TTS)
         cmd = ['catt', '-d', ip, 'info']
         try:
             status_process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
-            
             status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=float(self.casting_timeout))
             status_output = status_stdout.decode().strip()
             
-            # Sprawdzamy, czy to Backdrop (E8C28D3C) lub nasz DashCast (84912283)
-            is_safe_to_recast = any(id in status_output for id in ["E8C28D3C", "84912283", "8123"])
+            # Nasze kluczowe stany
+            is_backdrop = "E8C28D3C" in status_output or "Backdrop" in status_output
+            is_tts_receiver = "CC1AD845" in status_output
+            is_our_dash = any(id in status_output for id in ["84912283", "8123"])
             
-            # Jeśli to NIE jest bezpieczny stan (czyli np. Netflix/YouTube) i mamy dużo linii statusu
+            # --- DODANE: Resetowanie licznika prób ---
+            if (is_backdrop or is_tts_receiver) and active_device:
+                # Jeśli widzimy stan gotowości, zerujemy próby, aby wyjść z 'backing off'
+                self.device_manager.update_active_device(device_key, active_device.get('status'), reconnect_attempts=0)
+            # -----------------------------------------
+
+            is_safe_to_recast = is_backdrop or is_our_dash or "8123" in status_output
+            
             if not is_safe_to_recast and len(status_output.splitlines()) > 5:
                 _LOGGER.info(f"Device {device_name} ({ip}) shows non-idle status (other content), skipping reconnect")
                 if active_device:
@@ -925,16 +934,12 @@ class MonitoringManager:
         except asyncio.TimeoutError:
             _LOGGER.warning(f"Status check timed out for {device_name} ({ip})")
             status_process.terminate()
-            try:
-                await asyncio.wait_for(status_process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                status_process.kill()
             return False
         except Exception as e:
             _LOGGER.error(f"Error checking status before reconnect: {str(e)}")
             return False
         
-        # Update status to indicate casting is in progress
+        # BLOK 7: Wykonanie castingu
         self.device_manager.update_active_device(
             device_key=device_key,
             status=STATUS_CASTING_IN_PROGRESS,
@@ -944,8 +949,8 @@ class MonitoringManager:
         _LOGGER.info(f"Attempting to reconnect to {device_name} ({ip})")
         if self.stats_manager:
             await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_ATTEMPT)
+        
         dashboard_url = device_config.get('dashboard_url')
-        _LOGGER.debug(f"Casting URL {dashboard_url} to device {device_name} ({ip})")
         success = await self.casting_manager.async_cast_dashboard(ip, dashboard_url, device_config)
         
         if success:
@@ -964,11 +969,7 @@ class MonitoringManager:
         else:
             _LOGGER.error(f"Failed to reconnect to {device_name} ({ip})")
             if active_device:
-                self.device_manager.update_active_device(
-                    device_key=device_key,
-                    status='disconnected',
-                    last_checked=datetime.now().isoformat()
-                )
+                self.device_manager.update_active_device(device_key, 'disconnected', last_checked=datetime.now().isoformat())
             if self.stats_manager:
                 await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
             return False

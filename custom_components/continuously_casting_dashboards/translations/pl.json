@@ -120,7 +120,8 @@
                     "data": {
                         "device_name": "Nazwa urządzenia",
                         "dashboard_url": "URL Dashboardu",
-                        "volume": "Głośność (0-100)",
+                        "override_volume": "Użyj własnej głośności",
+                        "volume": "Głośność urządzenia podczas rzutowania (0-100)",
                         "enable_time_window": "Użyj własnego okna czasowego",
                         "start_time": "Czas Startu",
                         "end_time": "Czas Końca",
@@ -136,7 +137,7 @@
                     "data_description": {
                         "device_name": "Nazwa lub adres IP urządzenia Chromecast",
                         "dashboard_url": "Pełny adres (np. http://192.168.1.100:8123/lovelace/home?kiosk)",
-                        "volume": "Głośność urządzenia podczas rzutowania",
+                        "volume": "",
                         "speaker_groups": "Lista nazw grup głośników oddzielona przecinkami",
                         "add_another_dashboard": "Zapisuje ten dashboard i otwiera pusty formularz dla nowego",
                         "change_dashboard": "Zapisz zmiany i wybierz inny dashboard do edycji",
@@ -162,7 +163,8 @@
                     "description": "Skonfiguruj nowy dashboard do rzutowania na to urządzenie.",
                     "data": {
                         "dashboard_url": "URL Dashboardu",
-                        "volume": "Głośność (0-100)",
+                        "override_volume": "Użyj własnej głośności",
+                        "volume": "Głośność urządzenia podczas rzutowania (0-100)",
                         "enable_time_window": "Użyj własnego okna czasowego",
                         "start_time": "Czas Startu",
                         "end_time": "Czas Końca",
@@ -174,7 +176,7 @@
                     },
                     "data_description": {
                         "dashboard_url": "Pełny adres (np. http://192.168.1.100:8123/lovelace/home?kiosk)",
-                        "volume": "Głośność urządzenia podczas rzutowania",
+                        "volume": "",
                         "speaker_groups": "Lista nazw grup głośników oddzielona przecinkami"
                     }
                 }
@@ -188,7 +190,8 @@
                 "unknown": "Wystąpił nieoczekiwany błąd"
             },
             "abort": {
-                "subentry_updated": "Urządzenie zapisane!"
+                "subentry_updated": "Urządzenie zapisane!",
+                "reconfigure_successful": "Urządzenie zostało pomyślnie skonfigurowane."
             }
         }
     }

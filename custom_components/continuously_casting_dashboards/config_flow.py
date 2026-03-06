@@ -396,8 +396,13 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 else:
                     cleaned_input["dashboard_url"] = dashboard_url
 
-                if user_input.get("volume") is not None:
-                    cleaned_input["volume"] = user_input["volume"]
+                # LOGIKA CHECKBOXA: Zapisuj głośność tylko jeśli zaznaczono override
+                if user_input.get("override_volume"):
+                    cleaned_input["volume"] = user_input.get("volume")
+                    cleaned_input["override_volume"] = True
+                else:
+                    cleaned_input["volume"] = None
+                    cleaned_input["override_volume"] = False
 
                 if user_input.get("enable_time_window", False):
                     if user_input.get("start_time"):
@@ -412,26 +417,19 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                             errors["switch_entity_id"] = "entity_not_found"
                         else:
                             cleaned_input["switch_entity_id"] = entity_id
-                            entity_state = user_input.get(
-                                "switch_entity_state", ""
-                            ).strip()
+                            entity_state = user_input.get("switch_entity_state", "").strip()
                             if entity_state:
                                 cleaned_input["switch_entity_state"] = entity_state
 
                 if user_input.get("include_speaker_groups", False):
                     speaker_groups_input = user_input.get("speaker_groups", "").strip()
                     if speaker_groups_input:
-                        speaker_groups = [
-                            g.strip()
-                            for g in speaker_groups_input.split(",")
-                            if g.strip()
-                        ]
+                        speaker_groups = [g.strip() for g in speaker_groups_input.split(",") if g.strip()]
                         if speaker_groups:
                             cleaned_input["speaker_groups"] = speaker_groups
 
                 if not errors:
                     self._dashboards.append(cleaned_input)
-
                     if user_input.get("add_another", False):
                         return await self.async_step_add_dashboard()
                     else:
@@ -441,7 +439,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 _LOGGER.exception("Error adding dashboard: %s", ex)
                 errors["base"] = "unknown"
 
-        # Get global settings for defaults
+        # Formularz z dodanym checkboxem override_volume
         entry = self._get_entry()
         global_config = dict(entry.data)
         global_config.update(entry.options)
@@ -449,18 +447,13 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         schema = vol.Schema(
             {
                 vol.Required("dashboard_url"): cv.string,
+                vol.Optional("override_volume", default=False): cv.boolean,
                 vol.Optional("volume", default=5): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=100)
                 ),
                 vol.Optional("enable_time_window", default=False): cv.boolean,
-                vol.Optional(
-                    "start_time",
-                    default=global_config.get("start_time", DEFAULT_START_TIME),
-                ): selector.TimeSelector(),
-                vol.Optional(
-                    "end_time",
-                    default=global_config.get("end_time", DEFAULT_END_TIME),
-                ): selector.TimeSelector(),
+                vol.Optional("start_time", default=global_config.get("start_time", DEFAULT_START_TIME)): selector.TimeSelector(),
+                vol.Optional("end_time", default=global_config.get("end_time", DEFAULT_END_TIME)): selector.TimeSelector(),
                 vol.Optional("include_entity", default=False): cv.boolean,
                 vol.Optional("switch_entity_id", default=""): cv.string,
                 vol.Optional("switch_entity_state", default=""): cv.string,
@@ -678,8 +671,13 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 else:
                     cleaned_input["dashboard_url"] = dashboard_url
 
-                if user_input.get("volume") is not None:
-                    cleaned_input["volume"] = user_input["volume"]
+                # ZMIANA: Zapisuj głośność tylko jeśli checkbox jest zaznaczony
+                if user_input.get("override_volume"):
+                    cleaned_input["volume"] = user_input.get("volume")
+                    cleaned_input["override_volume"] = True
+                else:
+                    cleaned_input["volume"] = None
+                    cleaned_input["override_volume"] = False
 
                 if user_input.get("enable_time_window", False):
                     if user_input.get("start_time"):
@@ -736,6 +734,9 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         has_time = bool(current.get("start_time") or current.get("end_time"))
         has_entity = bool(current.get("switch_entity_id"))
         has_groups = bool(current.get("speaker_groups"))
+        
+        # ZMIANA: Sprawdzenie czy głośność jest obecnie ustawiona (czy nie jest None)
+        is_volume_set = current.get("volume") is not None
 
         # Get global settings for defaults
         entry = self._get_entry()
@@ -749,8 +750,12 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             vol.Required(
                 "dashboard_url", default=current.get("dashboard_url", "")
             ): cv.string,
+            # ZMIANA: Nowy checkbox do sterowania głośnością
             vol.Optional(
-                "volume", default=current.get("volume", 5)
+                "override_volume", default=is_volume_set
+            ): cv.boolean,
+            vol.Required(
+                "volume", default=current.get("volume") or 5
             ): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
             vol.Optional("enable_time_window", default=has_time): cv.boolean,
             vol.Optional(
@@ -810,8 +815,13 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         if dashboard_url:
             cleaned_input["dashboard_url"] = dashboard_url
 
-        if user_input.get("volume") is not None:
-            cleaned_input["volume"] = user_input["volume"]
+        # ZMIANA: Sprawdzamy nasz nowy checkbox 'override_volume'
+        if user_input.get("override_volume"):
+            cleaned_input["volume"] = user_input.get("volume")
+            cleaned_input["override_volume"] = True
+        else:
+            cleaned_input["volume"] = None
+            cleaned_input["override_volume"] = False
 
         if user_input.get("enable_time_window", False):
             if user_input.get("start_time"):

@@ -421,11 +421,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             start_time = config.get("start_time", DEFAULT_START_TIME)
             end_time = config.get("end_time", DEFAULT_END_TIME)
 
-            # Pobieranie nowych parametrów z użyciem stałych z const.py
+            # Getting new parameters using constants from const.py
             scan_interval = int(config.get("scan_interval", DEFAULT_SCAN_INTERVAL))
             max_retries = int(config.get("max_retries", DEFAULT_MAX_RETRIES))
             casting_timeout = float(config.get("casting_timeout", DEFAULT_CASTING_TIMEOUT))
-            # Pobieranie retry_delay z configu (z rzutowaniem na int)
+            # Getting retry_delay from config (cast to int)
             retry_delay = int(config.get("retry_delay", DEFAULT_RETRY_DELAY))
 
             # Ensure directory exists
@@ -435,7 +435,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             log_level = logging_level.upper()
             logging.getLogger(__name__).setLevel(getattr(logging, log_level))
 
-            # Nadpisanie scan_interval w słowniku config, aby reszta managerów go widziała
+            # Overriding scan_interval in the config dictionary so that other managers can see it
             config["scan_interval"] = scan_interval
             config["max_retries"] = max_retries
             config["casting_timeout"] = casting_timeout
@@ -452,7 +452,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.setdefault(DOMAIN, {})
             hass.data[DOMAIN][entry.entry_id] = {"caster": caster, "config": config, "platforms_setup": False}
 
-            # 🚀 FAST CORE STARTUP - only essential services, no device discovery
+            # FAST CORE STARTUP - only essential services, no device discovery
             _LOGGER.debug("Starting core services...")
             try:
                 # Start core services only (no device initialization)
@@ -472,7 +472,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.data[DOMAIN][entry.entry_id]["platforms_setup"] = True
                 _LOGGER.debug("Platforms setup completed")
                 
-                # 🚀 START BACKGROUND DEVICE INITIALIZATION - doesn't block integration loading
+                # START BACKGROUND DEVICE INITIALIZATION - doesn't block integration loading
                 _LOGGER.info("Integration loaded successfully, starting device initialization in background...")
                 hass.async_create_task(caster.start_background_initialization())
                 

@@ -3,8 +3,8 @@
     "name": "Continuously Cast Dashboards (Fork)",
     "documentation": "https://github.com/Gobi75/continuously_casting_dashboards",
     "requirements": ["catt==0.13.1"],
-    "version": "2.1.0",
+    "version": "2.0.9",
     "config_flow": true,
     "dependencies": [],
-    "codeowners": ["Gobi75"]
+    "codeowners": ["@b0mbays"]
   }

@@ -90,25 +90,13 @@ class StatsManager:
             _LOGGER.warning("Device manager not set in StatsManager")
             return {}
             
+        # Pobieramy pełne statystyki (w tym stopped_by_timer_devices) z device_manager
+        status_data = self.device_manager.get_summary_stats()
+        
+        # Dodajemy pozostałe wymagane pola
         active_devices = self.device_manager.get_all_active_devices()
-        
-        connected_count = sum(1 for d in active_devices.values() if d.get('status') == 'connected')
-        disconnected_count = sum(1 for d in active_devices.values() if d.get('status') == 'disconnected')
-        media_playing_count = sum(1 for d in active_devices.values() if d.get('status') == 'media_playing')
-        other_content_count = sum(1 for d in active_devices.values() if d.get('status') == 'other_content')
-        assistant_active_count = sum(1 for d in active_devices.values() if d.get('status') == STATUS_ASSISTANT_ACTIVE)
-        
-        # Format for Home Assistant sensors
-        status_data = {
-            'total_devices': len(active_devices),
-            'connected_devices': connected_count,
-            'disconnected_devices': disconnected_count,
-            'media_playing_devices': media_playing_count,
-            'other_content_devices': other_content_count,
-            'assistant_active_devices': assistant_active_count,
-            'last_updated': datetime.now().isoformat(),
-            'devices': {}
-        }
+        status_data['last_updated'] = datetime.now().isoformat()
+        status_data['devices'] = {}
         
         for device_key, device in active_devices.items():
             device_name = device.get('name', 'Unknown')
@@ -117,6 +105,8 @@ class StatsManager:
             status_data['devices'][device_name] = {
                 'ip': ip,
                 'status': device.get('status', 'unknown'),
+                'app_id': device.get('app_id', 'Unknown'),       # Pobieramy z managera
+                'display_name': device.get('display_name', 'Unknown'), # Pobieramy z managera
                 'last_checked': device.get('last_checked', ''),
                 'reconnect_attempts': device.get('reconnect_attempts', 0)
             }

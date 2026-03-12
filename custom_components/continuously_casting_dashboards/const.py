@@ -35,6 +35,7 @@ STATUS_STOPPED = "stopped"
 STATUS_SPEAKER_GROUP_ACTIVE = "speaker_group_active"
 STATUS_CASTING_IN_PROGRESS = "casting_in_progress"
 STATUS_ASSISTANT_ACTIVE = "assistant_active"
+STATUS_STOPPED_BY_TIMER = "stopped_by_timer"
 
 # Health stats event types
 EVENT_CONNECTION_ATTEMPT = "connection_attempt"

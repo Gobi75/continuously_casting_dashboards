@@ -50,13 +50,15 @@ class TimeWindowChecker:
     def get_current_device_config(self, device_name, device_configs):
         """Get the current device configuration based on the current time window."""
         now = dt_util.now().time()
+        active_config = None
+        found_match = False
+        
+        _LOGGER.debug(f"!!! MODYFIKACJA DZIALA !!! Sprawdzam {len(device_configs)} konfiguracji dla {device_name}")
 
-        # Try to find a config whose time window includes the current time
         for config in device_configs:
             device_start = config.get("start_time", self.default_start_time)
             device_end = config.get("end_time", self.default_end_time)
 
-            # Parse times to time objects
             try:
                 start_time = dt_time(*map(int, device_start.split(":")))
                 end_time = dt_time(*map(int, device_end.split(":")))
@@ -64,32 +66,28 @@ class TimeWindowChecker:
                 _LOGGER.error(f"Error parsing time window for {device_name}: {str(e)}")
                 continue
 
-            # Check if the current time is within this window
-            is_in_window = False
+            # Sprawdzamy dopasowanie
+            matched_now = False
             if start_time <= end_time:
-                # Simple case: start_time is before end_time in the same day
-                is_in_window = start_time <= now <= end_time
+                matched_now = start_time <= now <= end_time
             else:
-                # Complex case: time window spans midnight
-                is_in_window = now >= start_time or now <= end_time
+                matched_now = now >= start_time or now <= end_time
 
-            if is_in_window:
-                _LOGGER.debug(
-                    f"Found matching time window for {device_name}: {start_time}-{end_time}"
-                )
-                # Add the parsed time objects to the config for convenience
+            if matched_now:
                 config["parsed_start_time"] = start_time
                 config["parsed_end_time"] = end_time
-                return config, True
+                active_config = config
+                found_match = True
+                _LOGGER.debug(f"Dopasowano okno: {start_time}-{end_time} dla URL: {config.get('dashboard_url')}")
 
-        # If no matching time window is found, return the first config as default (with an indicator that no match was found)
+        # Zwracamy wynik dopiero PO sprawdzeniu całej pętli for
+        if found_match:
+            _LOGGER.debug(f"WYGRYWA: {active_config.get('dashboard_url')}")
+            return active_config, True
+
         if device_configs:
-            _LOGGER.debug(
-                f"No matching time window for {device_name}, using first config as default"
-            )
             return device_configs[0], False
 
-        # If no configs at all, return None
         return None, False
 
 

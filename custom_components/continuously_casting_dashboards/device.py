@@ -6,6 +6,9 @@ import re
 from datetime import datetime
 from homeassistant.core import HomeAssistant
 
+# Importujemy stałą, aby zliczanie statystyk było spójne z resztą systemu
+from .const import STATUS_STOPPED_BY_TIMER
+
 _LOGGER = logging.getLogger(__name__)
 
 # Simple IPv4 validation regex
@@ -18,10 +21,10 @@ class DeviceManager:
         """Initialize the device manager."""
         self.hass = hass
         self.config = config
-        self.device_ip_cache = {}  # Cache for device IPs
-        self.active_devices = {}   # Track active devices
-        self.active_checks = {}    # Track active status checks
-        self.status_cache = {}     # Short-lived cache for catt status output
+        self.device_ip_cache = {}    # Cache for device IPs
+        self.active_devices = {}     # Track active devices
+        self.active_checks = {}      # Track active status checks
+        self.status_cache = {}       # Short-lived cache for catt status output
 
     def _cache_status_output(self, ip, output):
         """Cache status output briefly to avoid duplicate catt calls."""
@@ -46,11 +49,10 @@ class DeviceManager:
         if not status_output:
             return False
         status_lower = status_output.lower()
+        # Ignorujemy wzmianki o Home Assistant, żeby nie mylić go z Google Assistant
         sanitized = status_lower.replace("homeassistant", "").replace("home assistant", "")
 
-        if "google assistant" in sanitized:
-            return True
-        if re.search(r"\bassistant\b", sanitized):
+        if "google assistant" in sanitized or re.search(r"\bassistant\b", sanitized):
             return True
 
         assistant_keywords = ["timer", "alarm", "reminder", "stopwatch", "countdown"]
@@ -66,7 +68,6 @@ class DeviceManager:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
             output = stdout.decode().strip()
             
-            # PEŁNY STATUS TYLKO DLA DEBUG
             if output:
                 _LOGGER.debug(f"--- FULL DEVICE STATUS [{ip}] ---\n{output}\n---------------------------")
             
@@ -74,12 +75,58 @@ class DeviceManager:
         except Exception as e:
             return None, None, None, str(e)
 
+    async def async_get_full_device_status(self, ip):
+        """POBIERANIE STATUSU: Jedno zapytanie do Chromecasta, komplet informacji zwrotnych."""
+        stdout_str, _, returncode, _ = await self._async_run_status_command(ip)
+        
+        if not stdout_str or returncode != 0:
+            return {
+                "is_online": False, 
+                "is_our_dashboard": False, 
+                "is_media_playing": False, 
+                "is_assistant_active": False, 
+                "is_backdrop": False,
+                "app_id": None,
+                "output": ""
+            }
+
+        status_lower = stdout_str.lower()
+        
+        # --- NOWE: Wyciąganie app_id z tekstu ---
+        current_app_id = None
+        for line in stdout_str.splitlines():
+            if "app_id:" in line.lower():
+                current_app_id = line.split(":")[-1].strip()
+                break
+        # ---------------------------------------
+        
+        # 1. Nasz Dashboard (AppID DashCast)
+        is_ours = any(x in status_lower for x in ["84912283", "dashcast"])
+        
+        # 2. Backdrop (Wygaszacz/Pulpit Google)
+        is_backdrop = any(x in status_lower for x in ["e8c28d3c", "backdrop"])
+        
+        # 3. Asystent Google (Timer/Alarm)
+        assistant_active = self._status_indicates_assistant_activity(stdout_str)
+        
+        # 4. Multimedia (Spotify/YouTube itp.)
+        media_playing = any(x in stdout_str for x in ["PLAYING", "PAUSED", "BUFFERING"])
+        is_media = media_playing and not is_ours and not is_backdrop
+
+        return {
+            "is_online": True,
+            "is_our_dashboard": is_ours,
+            "is_media_playing": is_media,
+            "is_assistant_active": assistant_active,
+            "is_backdrop": is_backdrop,
+            "app_id": current_app_id,  # <--- TERAZ PRZEKAZUJEMY TO DALEJ
+            "output": stdout_str
+        }
+
     async def _async_execute_device_command(self, ip, command_str, timeout=10.0):
-        """Execute a control command (like volume 0, stop, etc.) via catt."""
+        """Execute a control command via catt."""
         cmd_parts = command_str.split()
         cmd = ['catt', '-d', ip] + cmd_parts
-        _LOGGER.debug(f"EXECUTING CONTROL COMMAND: {' '.join(cmd)}")
-        
         try:
             process = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -110,36 +157,6 @@ class DeviceManager:
         except:
             return None
 
-    async def async_is_media_playing(self, ip):
-        """Check if media is playing or paused on the device."""
-        stdout_str, _, returncode, _ = await self._async_run_status_command(ip)
-        if not stdout_str or returncode != 0:
-            return False
-
-        status_lower = stdout_str.lower()
-        if "84912283" in stdout_str: return True # DashCast
-        if "e8c28d3c" in status_lower or "backdrop" in status_lower: return False
-
-        media_apps = ["spotify", "youtube", "netflix", "plex", "disney+", "hulu"]
-        if any(app in status_lower for app in media_apps): return True
-        
-        return any(x in stdout_str for x in ["PLAYING", "PAUSED", "BUFFERING"])
-
-    async def async_is_assistant_active(self, ip, status_output=None):
-        """Check if Google Assistant is active."""
-        if status_output is None:
-            status_output = self._get_cached_status_output(ip)
-        if status_output is None:
-            status_output, _, _, _ = await self._async_run_status_command(ip)
-        return self._status_indicates_assistant_activity(status_output)
-
-    async def async_check_device_status(self, ip):
-        """Check if a device is still casting our dashboard."""
-        stdout_str, _, returncode, _ = await self._async_run_status_command(ip)
-        if stdout_str and returncode == 0:
-            return any(x in stdout_str.lower() for x in ["84912283", "dashcast", "dummy"])
-        return False
-
     async def async_check_speaker_group_state(self, ip, speaker_groups):
         """Check if any of the speaker groups is active."""
         if not speaker_groups: return False
@@ -166,3 +183,32 @@ class DeviceManager:
 
     def get_device_current_dashboard(self, device_key):
         return self.active_devices.get(device_key, {}).get('current_dashboard')
+
+    def get_summary_stats(self):
+        """Calculate summary statistics for all devices including timer stops."""
+        stats = {
+            "total_devices": len(self.active_devices),
+            "connected_devices": 0,
+            "disconnected_devices": 0,
+            "media_playing_devices": 0,
+            "other_content_devices": 0,
+            "assistant_active_devices": 0,
+            "stopped_by_timer_devices": 0,
+        }
+
+        for device in self.active_devices.values():
+            status = device.get('status')
+            if status == 'connected':
+                stats["connected_devices"] += 1
+            elif status == 'disconnected':
+                stats["disconnected_devices"] += 1
+            elif status == 'media_playing':
+                stats["media_playing_devices"] += 1
+            elif status == 'other_content':
+                stats["other_content_devices"] += 1
+            elif status == 'assistant_active':
+                stats["assistant_active_devices"] += 1
+            elif status == STATUS_STOPPED_BY_TIMER:
+                stats["stopped_by_timer_devices"] += 1
+
+        return stats

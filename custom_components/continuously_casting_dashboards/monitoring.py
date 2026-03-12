@@ -17,7 +17,8 @@ from .const import (
     CONF_SWITCH_ENTITY,
     DEFAULT_SCAN_INTERVAL,       # Dodaj to
     DEFAULT_MAX_RETRIES,        # Dodaj to
-    DEFAULT_CASTING_TIMEOUT     # Dodaj to
+    DEFAULT_CASTING_TIMEOUT,     # Dodaj to
+    STATUS_STOPPED_BY_TIMER
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -133,38 +134,21 @@ class MonitoringManager:
                         )
                         _LOGGER.info(f"Registered state change listener for device {device_name} switch entity: {device_switch}")
 
-    async def _async_check_single_device(self, target_device_name):
-        """Check a single specific device instead of all devices."""
-        if self.monitor_lock.locked():
-            _LOGGER.debug(f"Previous monitoring cycle still running, skipping single device check for {target_device_name}")
-            return
-            
-        async with self.monitor_lock:
-            _LOGGER.debug(f"Running single device check for {target_device_name}")
-            
-            # Get device IP
-            ip = await self._get_device_ip_with_timeout(target_device_name)
-            if not ip:
-                _LOGGER.warning(f"Could not get IP for {target_device_name}, skipping check")
-                return
-            
-            # Get the current device config
-            if target_device_name not in self.active_device_configs:
-                _LOGGER.warning(f"No active configuration for {target_device_name}, skipping")
-                return
-                
-            active_config_info = self.active_device_configs[target_device_name]
-            current_config = active_config_info['config']
-            
-            # Process this single device using the same logic as the main monitoring
-            await self._process_single_device(target_device_name, ip, current_config, force_check=True)
-
     async def _process_single_device(self, device_name, ip, current_config, force_check=False):
             """Process a single device - extracted from async_monitor_devices for reuse."""
             device_key = f"{device_name}_{ip}"
             
-            # SINGLE STATUS CHECK - do this once and reuse the result
-            is_casting = await self.device_manager.async_check_device_status(ip)
+            # --- START: POBIERANIE STATUSU (RAZ A PORZADNIE) ---
+            full_status = await self.device_manager.async_get_full_device_status(ip)
+            
+            is_casting = full_status.get('is_our_dashboard', False)
+            is_media_playing = full_status.get('is_media_playing', False)
+            assistant_active = full_status.get('is_assistant_active', False)
+            is_idle = full_status.get('is_backdrop', False) or not full_status.get('is_online', False) or full_status.get('app_id') is None or full_status.get('app_id') == 'None'
+            status_output = full_status.get('output', "")
+            
+            _LOGGER.debug(f"CYCLE_START [{device_name}]: AppID: {full_status.get('app_id')} | Nasz Dashboard: {is_casting}")
+            # --- END: POBIERANIE STATUSU ---
             
             # Check if casting is enabled for this specific device
             if not await self.switch_checker.async_check_switch_entity(device_name, current_config):
@@ -186,22 +170,33 @@ class MonitoringManager:
             # Check if the current time is within any of the device's time windows
             _, is_in_window = self.time_window_checker.get_current_device_config(device_name, self.devices[device_name])
                 
+            # --- LOGIKA WYJSCIA Z OKNA CZASOWEGO (ZINTEGROWANA) ---
+            active_device = self.device_manager.get_active_device(device_key)
+            previous_status = active_device.get('status', 'unknown') if active_device else 'unknown'
+
             # Handle device outside all time windows
             if not is_in_window:
-                _LOGGER.debug(f"Outside all casting time windows for {device_name}, checking if dashboard is active to stop it")
-                
-                if is_casting:  # Reuse the single status check result
-                    _LOGGER.info(f"Device {device_name} is casting our dashboard outside allowed time window. Stopping cast.")
-                    await self.async_stop_casting(ip)
+                if previous_status != STATUS_STOPPED_BY_TIMER:
+                    _LOGGER.info(f"Outside all casting time windows for {device_name}, checking if dashboard is active to stop it")
                     
-                    # Update device status
+                    if is_casting:  # Reuse the single status check result
+                        _LOGGER.info(f"Device {device_name} is casting our dashboard outside allowed time window. Stopping cast.")
+                        await self.async_stop_casting(ip)
+                    
+                    # Update device status to STATUS_STOPPED_BY_TIMER to prevent repeated stops
                     self.device_manager.update_active_device(
                         device_key=device_key,
-                        status='stopped',
+                        status=STATUS_STOPPED_BY_TIMER,
+                        name=device_name,
+                        ip=ip,
                         last_checked=datetime.now().isoformat()
                     )
-                
                 return  # Skip to the next device
+            
+            # Reset status if we just re-entered the window
+            if is_in_window and previous_status == STATUS_STOPPED_BY_TIMER:
+                _LOGGER.info(f"Re-entering time window for {device_name}. Resuming normal monitoring.")
+            # --- KONIEC LOGIKI OKNA ---
             
             # Check if casting is already in progress for this device
             if ip in self.casting_manager.active_casting_operations:
@@ -231,7 +226,7 @@ class MonitoringManager:
                         await asyncio.sleep(2)
                     
                     # Cast the new dashboard
-                    await self.async_start_device(device_name, current_config, ip)
+                    await self.async_start_device(device_name, current_config, ip, is_media_playing=is_media_playing)
                     
                     # Reset the instance_change flag
                     self.active_device_configs[device_name]['instance_change'] = False
@@ -261,15 +256,13 @@ class MonitoringManager:
                             ip=ip,
                             first_seen=datetime.now().isoformat(),
                             last_checked=datetime.now().isoformat(),
-                            reconnect_attempts=0
+                            reconnect_attempts=0,
+                            app_id=full_status.get('app_id'),
+                            display_name=full_status.get('display_name')
                         )
                     return
             
-            # Check if media is playing before attempting to reconnect
-            is_media_playing = await self.device_manager.async_is_media_playing(ip)
-
-            # Check if Google Assistant (timer/alarm/reminder) is active
-            assistant_active = await self.device_manager.async_is_assistant_active(ip)
+            # Check if Google Assistant (timer/alarm/reminder) is active (REUSED FROM FULL_STATUS)
             if assistant_active:
                 _LOGGER.info(f"Google Assistant activity detected on {device_name}, pausing dashboard casting")
 
@@ -292,20 +285,21 @@ class MonitoringManager:
                         ip=ip,
                         first_seen=datetime.now().isoformat(),
                         last_checked=datetime.now().isoformat(),
-                        reconnect_attempts=0
+                        reconnect_attempts=0,
+                        app_id=full_status.get('app_id'),
+                        display_name=full_status.get('display_name')
                     )
                 return
 
+            # Check if media is playing (REUSED FROM FULL_STATUS)
             if is_media_playing:
                 _LOGGER.info(f"Media is currently playing on {device_name}, skipping status check")
                 # Update device status to media_playing
                 active_device = self.device_manager.get_active_device(device_key)
                 if active_device:
                     # If device was previously connected to our dashboard, add a delay before marking as media_playing
-                    # This prevents rapid switching when "Hey Google" commands are being processed
                     if active_device.get('status') == 'connected':
                         _LOGGER.info(f"Device {device_name} was showing our dashboard but now has media - giving it time to stabilize")
-                        # Don't update the status yet, let it remain as 'connected' for this cycle
                     else:
                         self.device_manager.update_active_device(device_key, 'media_playing', last_checked=datetime.now().isoformat())
                 else:
@@ -317,37 +311,13 @@ class MonitoringManager:
                         ip=ip,
                         first_seen=datetime.now().isoformat(),
                         last_checked=datetime.now().isoformat(),
-                        reconnect_attempts=0
+                        reconnect_attempts=0,
+                        app_id=full_status.get('app_id'),
+                        display_name=full_status.get('display_name')
                     )
                 return
             
-            # Check if device is idle with just volume info (manual status check for idle detection)
-            cmd = ['catt', '-d', ip, 'status']
-            status_process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            
-            try:
-                # Add timeout to prevent hanging
-                status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=float(self.casting_timeout))
-                status_output = status_stdout.decode().strip()
-                
-                # If only volume info is returned, device is truly idle
-                is_idle = len(status_output.splitlines()) <= 2 and all(line.startswith("Volume") for line in status_output.splitlines())
-            except asyncio.TimeoutError:
-                _LOGGER.warning(f"Status check timed out for {device_name} ({ip})")
-                status_process.terminate()
-                try:
-                    await asyncio.wait_for(status_process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    status_process.kill()
-                # Assume device is not idle to avoid reconnect attempts that might fail
-                is_idle = False
-                status_output = ""
-            
-            # 🚀 NEW: Handle switch-triggered immediate casting
+            # Handle switch-triggered immediate casting
             if force_check:
                 _LOGGER.info(f"Switch-triggered check for {device_name}")
                 
@@ -371,6 +341,8 @@ class MonitoringManager:
                             first_seen=datetime.now().isoformat(),
                             last_checked=datetime.now().isoformat(),
                             reconnect_attempts=0,
+                            app_id=full_status.get('app_id'),
+                            display_name=full_status.get('display_name'),
                             current_dashboard=current_config.get('dashboard_url')
                         )
                     return
@@ -378,7 +350,7 @@ class MonitoringManager:
                 elif is_idle:
                     _LOGGER.info(f"Switch triggered and device {device_name} is idle - starting immediate cast")
                     # Bypass stabilization period, cast immediately
-                    await self.async_start_device(device_name, current_config, ip)
+                    await self.async_start_device(device_name, current_config, ip, is_media_playing=is_media_playing)
                     return
                 
                 else:
@@ -399,11 +371,13 @@ class MonitoringManager:
                             ip=ip,
                             first_seen=datetime.now().isoformat(),
                             last_checked=datetime.now().isoformat(),
-                            reconnect_attempts=0
+                            reconnect_attempts=0,
+                            app_id=full_status.get('app_id'),
+                            display_name=full_status.get('display_name')
                         )
                     return
             
-            # 🔄 EXISTING: Regular monitoring with stabilization period
+            # Regular monitoring with stabilization period
             # Update device status based on consolidated check results
             active_device = self.device_manager.get_active_device(device_key)
             if active_device:
@@ -412,7 +386,7 @@ class MonitoringManager:
                 current_time = time.time()
                 
                 # Determine current state and take appropriate action
-                if is_casting:  # Use the single status check result
+                if is_casting:
                     # Device is showing our dashboard
                     if previous_status != 'connected':
                         self.device_manager.update_active_device(
@@ -422,36 +396,41 @@ class MonitoringManager:
                             current_dashboard=current_config.get('dashboard_url')
                         )
                         _LOGGER.info(f"Device {device_name} ({ip}) is now connected")
-                        self.device_manager.update_active_device(device_key, 'connected', reconnect_attempts=0)
+                        self.device_manager.update_active_device(
+                        device_key,
+                        'connected',
+                        reconnect_attempts=0
+                        )
                         if self.stats_manager:
                             await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_SUCCESS)
                     else:
                         self.device_manager.update_active_device(device_key, 'connected', last_checked=datetime.now().isoformat())
                 elif is_idle:
-                    # Sprawdzamy, czy to Backdrop (identyfikator E8C28D3C)
+                    # RESETUJEMY LICZNIK, jesli widzimy Backdrop - to nie jest blad!
                     is_backdrop = "E8C28D3C" in status_output or "backdrop" in status_output.lower()
-                    
-                    # RESETUJEMY LICZNIK, jeśli widzimy Backdrop - to nie jest błąd!
                     if is_backdrop:
                         self.device_manager.update_active_device(device_key, previous_status, reconnect_attempts=0)
                     
-                    # DYNAMICZNY CZAS: 2s dla Backdropa, 30s dla innych stanów bezczynności
+                    # DYNAMICZNY CZAS: 2s dla Backdropa, 30s dla innych stanow bezczynnosci
                     min_time_between_reconnects = 2 if is_backdrop else 30
-                    
                     time_since_last_change = current_time - last_status_change
                     
                     if previous_status != 'disconnected':
-                        log_msg = "Backdrop detected - fast reconnect enabled" if is_backdrop else "idle and not casting"
-                        _LOGGER.info(f"Device {device_name} ({ip}) is {log_msg}")
+                        if is_backdrop:
+                            _LOGGER.info(f"Device {device_name} ({ip}) is Backdrop - reconnecting immediately")
+                            await self.async_reconnect_device(device_name, ip, current_config, full_status=full_status)
+                            return
                         
+                        _LOGGER.info(f"Device {device_name} ({ip}) is idle and not casting")
                         self.device_manager.update_active_device(
                             device_key=device_key, 
                             status='disconnected', 
                             last_status_change=current_time,
-                            last_checked=datetime.now().isoformat()
+                            last_checked=datetime.now().isoformat(),
+                            app_id=full_status.get('app_id'),
+                            display_name=full_status.get('display_name')
                         )
                     else:
-                        # Reconnect nastąpi niemal natychmiast po wykryciu Backdropa
                         if time_since_last_change > min_time_between_reconnects:
                             _LOGGER.info(f"Device {device_name} ({ip}) reconnecting (delay: {min_time_between_reconnects}s)")
                             await self.async_reconnect_device(device_name, ip, current_config)
@@ -465,14 +444,16 @@ class MonitoringManager:
                             device_key=device_key, 
                             status='other_content', 
                             last_status_change=current_time,
-                            last_checked=datetime.now().isoformat()
+                            last_checked=datetime.now().isoformat(),
+                            app_id=full_status.get('app_id'),
+                            display_name=full_status.get('display_name')
                         )
                     else:
                         self.device_manager.update_active_device(device_key, 'other_content', last_checked=datetime.now().isoformat())
                     _LOGGER.info(f"Device {device_name} ({ip}) has other content (not our dashboard and not idle)")
             else:
                 # First time seeing this device
-                if is_casting:  # Use the single status check result
+                if is_casting:
                     status = 'connected'
                     _LOGGER.info(f"Device {device_name} ({ip}) is casting our dashboard")
                 elif is_idle:
@@ -491,6 +472,8 @@ class MonitoringManager:
                     last_checked=datetime.now().isoformat(),
                     last_status_change=time.time(),
                     reconnect_attempts=0,
+                    app_id=full_status.get('app_id'),
+                    display_name=full_status.get('display_name'),
                     current_dashboard=current_config.get('dashboard_url') if status == 'connected' else None
                 )
 
@@ -528,7 +511,9 @@ class MonitoringManager:
                 self.device_manager.update_active_device(
                     device_key=device_key,
                     status='stopped',
-                    last_checked=datetime.now().isoformat()
+                    last_checked=datetime.now().isoformat(),
+                    app_id=full_status.get('app_id'),
+                    display_name=full_status.get('display_name')
                 )
             else:
                 _LOGGER.error(f"Failed to stop dashboard cast on {name} ({ip})")
@@ -590,9 +575,12 @@ class MonitoringManager:
                 _LOGGER.info(f"Outside casting time window for {device_name}, skipping initial cast")
                 continue
             
-            # Check if media is playing
-            if await self.device_manager.async_is_media_playing(ip):
-                _LOGGER.info(f"Media is currently playing on {device_name}, skipping initial cast")
+            # Pobieramy pelny status urzadzenia
+            full_status = await self.device_manager.async_get_full_device_status(ip)
+            
+            # Sprawdzamy, czy w tym statusie flaga 'is_media_playing' jest True
+            if full_status.get('is_media_playing', False):
+                _LOGGER.info(f"Media is currently playing on {device_name}, skipping cast")
                 device_key = f"{device_name}_{ip}"
                 self.device_manager.update_active_device(
                     device_key=device_key,
@@ -601,7 +589,9 @@ class MonitoringManager:
                     ip=ip,
                     first_seen=datetime.now().isoformat(),
                     last_checked=datetime.now().isoformat(),
-                    reconnect_attempts=0
+                    reconnect_attempts=0,
+                    app_id=full_status.get('app_id'),
+                    display_name=full_status.get('display_name')
                 )
                 continue
                 
@@ -618,7 +608,9 @@ class MonitoringManager:
                         ip=ip,
                         first_seen=datetime.now().isoformat(),
                         last_checked=datetime.now().isoformat(),
-                        reconnect_attempts=0
+                        reconnect_attempts=0,
+                        app_id=full_status.get('app_id'),
+                        display_name=full_status.get('display_name')
                     )
                     continue
             
@@ -631,7 +623,7 @@ class MonitoringManager:
         
         return True
     
-    async def async_start_device(self, device_name, device_config, ip=None):
+    async def async_start_device(self, device_name, device_config, ip=None, is_media_playing=False):
         """Start casting to a specific device."""
         _LOGGER.info(f"Starting casting to {device_name}")
         
@@ -641,9 +633,22 @@ class MonitoringManager:
             if not ip:
                 _LOGGER.error(f"Could not get IP for {device_name}, skipping")
                 return
-        
-        # Check if media is playing before casting
-        if await self.device_manager.async_is_media_playing(ip):
+
+        # --- ZABEZPIECZENIE PRZED LAGIEM URZADZENIA ---
+        try:
+            # Czekamy max 5 sekund na status. Jesli Mi Box "muli", idziemy dalej.
+            full_status = await asyncio.wait_for(
+                self.device_manager.async_get_full_device_status(ip), 
+                timeout=5.0
+            )
+        except Exception as e:
+            _LOGGER.warning(f"Timeout lub błąd pobierania statusu z {ip} ({device_name}): {e}")
+            # Tworzymy bezpieczny pusty status, zeby reszta kodu sie nie wywalila
+            full_status = {'app_id': 'Unknown', 'display_name': 'Unknown'}
+        # ----------------------------------------------
+
+        # Reszta kodu pozostaje bez zmian (wykorzystuje full_status.get)
+        if is_media_playing:
             _LOGGER.info(f"Media is currently playing on {device_name}, skipping cast")
             device_key = f"{device_name}_{ip}"
             self.device_manager.update_active_device(
@@ -651,9 +656,10 @@ class MonitoringManager:
                 status='media_playing',
                 name=device_name,
                 ip=ip,
-                first_seen=datetime.now().isoformat(),
                 last_checked=datetime.now().isoformat(),
-                reconnect_attempts=0
+                reconnect_attempts=0,
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name')
             )
             return
         
@@ -666,7 +672,9 @@ class MonitoringManager:
                 status=STATUS_CASTING_IN_PROGRESS,
                 name=device_name,
                 ip=ip,
-                last_checked=datetime.now().isoformat()
+                last_checked=datetime.now().isoformat(),
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name')
             )
             return
         
@@ -677,7 +685,9 @@ class MonitoringManager:
             status=STATUS_CASTING_IN_PROGRESS,
             name=device_name,
             ip=ip,
-            last_checked=datetime.now().isoformat()
+            last_checked=datetime.now().isoformat(),
+            app_id=full_status.get('app_id'),
+            display_name=full_status.get('display_name')
         )
         
         if self.stats_manager:
@@ -694,9 +704,10 @@ class MonitoringManager:
                 status='connected',
                 name=device_name,
                 ip=ip,
-                first_seen=datetime.now().isoformat(),
                 last_checked=datetime.now().isoformat(),
                 reconnect_attempts=0,
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name'),
                 current_dashboard=dashboard_url
             )
             if self.stats_manager:
@@ -708,9 +719,10 @@ class MonitoringManager:
                 status='disconnected',
                 name=device_name,
                 ip=ip,
-                first_seen=datetime.now().isoformat(),
                 last_checked=datetime.now().isoformat(),
-                reconnect_attempts=0
+                reconnect_attempts=0,
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name')
             )
     
     async def async_update_device_configs(self):
@@ -854,47 +866,53 @@ class MonitoringManager:
             _LOGGER.error(f"Error stopping casting on device at {ip}: {str(e)}")
             return False
 
-    async def async_reconnect_device(self, device_name, ip, device_config):
-        """Attempt to reconnect a disconnected device."""
+    async def async_reconnect_device(self, device_name, ip, device_config, full_status=None):
+        """Zoptymalizowany reconnect - uzywa danych z full_status zamiast pytac urzadzenie."""
         device_key = f"{device_name}_{ip}"
         
-        # BLOK 1: Sprawdzenie trwającego castingu
+        # Jesli nie przekazalismy statusu (np. wywolanie reczne), pobierz go (bezpiecznik)
+        if not full_status:
+            full_status = await self.device_manager.async_get_full_device_status(ip)
+        
+        # Wyciagamy potrzebne dane ze statusu
+        is_media_playing = full_status.get('is_media_playing', False)
+        is_backdrop = full_status.get('is_backdrop', False)
+        is_tts_receiver = "CC1AD845" in full_status.get('output', "")
+        is_our_dash = full_status.get('is_our_dashboard', False)
+        status_output = full_status.get('output', "")
+
+        # BLOK 1: Sprawdzenie trwajacego castingu
         if ip in self.casting_manager.active_casting_operations:
             _LOGGER.info(f"Casting already in progress for {device_name} ({ip}), skipping reconnect")
             self.device_manager.update_active_device(
                 device_key=device_key,
                 status=STATUS_CASTING_IN_PROGRESS,
-                last_checked=datetime.now().isoformat()
+                last_checked=datetime.now().isoformat(),
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name')
             )
             return False
         
-        # BLOK 2: Okno czasowe
+        # BLOK 2: Okno czasowe (zostawiamy dla pewnosci)
         if not await self.time_window_checker.async_is_within_time_window(device_name, device_config):
             _LOGGER.info(f"Outside casting time window for {device_name}, skipping reconnect")
             return False
         
-        # BLOK 3: Grupy głośników
-        speaker_groups = device_config.get('speaker_groups')
-        if speaker_groups:
-            if await self.device_manager.async_check_speaker_group_state(ip, speaker_groups):
-                _LOGGER.info(f"Speaker Group playback is active for {device_name}, skipping reconnect")
-                active_device = self.device_manager.get_active_device(device_key)
-                if active_device:
-                    self.device_manager.update_active_device(device_key, 'speaker_group_active')
-                return False
-        
-        # BLOK 4: Sprawdzenie odtwarzania mediów (podstawowe)
-        if await self.device_manager.async_is_media_playing(ip):
+        # BLOK 3 & 4: Media i Grupy (Uzywamy gotowych danych)
+        if is_media_playing:
             _LOGGER.info(f"Media is currently playing on {device_name}, skipping reconnect")
-            active_device = self.device_manager.get_active_device(device_key)
-            if active_device:
-                self.device_manager.update_active_device(device_key, 'media_playing')
+            self.device_manager.update_active_device(device_key, 'media_playing')
             return False
-        
-        # BLOK 5: Zarządzanie licznikami i Backing off
+
+        # BLOK 5: Zarzadzanie licznikami i Backing off
         active_device = self.device_manager.get_active_device(device_key)
         if active_device:
             attempts = active_device.get('reconnect_attempts', 0) + 1
+            
+            # Resetowanie licznika jesli widzimy Backdrop/TTS/Nasze
+            if is_backdrop or is_tts_receiver or is_our_dash:
+                attempts = 0
+            
             self.device_manager.update_active_device(device_key, active_device.get('status'), reconnect_attempts=attempts)
             
             if attempts > self.max_retries:
@@ -902,41 +920,15 @@ class MonitoringManager:
                 if self.stats_manager:
                     await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
                 return False
-        
-        # BLOK 6: Diagnostyka CATT (Dodano reset licznika dla Backdrop/TTS)
-        cmd = ['catt', '-d', ip, 'info']
-        try:
-            status_process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            status_stdout, status_stderr = await asyncio.wait_for(status_process.communicate(), timeout=float(self.casting_timeout))
-            status_output = status_stdout.decode().strip()
-            
-            # Nasze kluczowe stany
-            is_backdrop = "E8C28D3C" in status_output or "Backdrop" in status_output
-            is_tts_receiver = "CC1AD845" in status_output
-            is_our_dash = any(id in status_output for id in ["84912283", "8123"])
-            
-            # --- DODANE: Resetowanie licznika prób ---
-            if (is_backdrop or is_tts_receiver) and active_device:
-                # Jeśli widzimy stan gotowości, zerujemy próby, aby wyjść z 'backing off'
-                self.device_manager.update_active_device(device_key, active_device.get('status'), reconnect_attempts=0)
-            # -----------------------------------------
 
-            is_safe_to_recast = is_backdrop or is_our_dash or "8123" in status_output
-            
-            if not is_safe_to_recast and len(status_output.splitlines()) > 5:
-                _LOGGER.info(f"Device {device_name} ({ip}) shows non-idle status (other content), skipping reconnect")
-                if active_device:
-                    self.device_manager.update_active_device(device_key, 'other_content')
-                return False
-                
-        except asyncio.TimeoutError:
-            _LOGGER.warning(f"Status check timed out for {device_name} ({ip})")
-            status_process.terminate()
-            return False
-        except Exception as e:
-            _LOGGER.error(f"Error checking status before reconnect: {str(e)}")
+        # BLOK 6: Decyzja o bezpieczenstwie recastu (Uzywamy danych z full_status)
+        # Jesli to nie nasz dash, nie backdrop i output jest dlugi -> cos innego tam gra
+        app_id = full_status.get('app_id')
+        is_none = app_id is None or app_id == 'None' or app_id == ''
+        is_safe_to_recast = is_backdrop or is_our_dash or is_none or "8123" in status_output
+        if not is_safe_to_recast and len(status_output.splitlines()) > 5:
+            _LOGGER.info(f"Device {device_name} ({ip}) shows non-idle status (other content), skipping reconnect")
+            self.device_manager.update_active_device(device_key, 'other_content')
             return False
         
         # BLOK 7: Wykonanie castingu
@@ -955,21 +947,21 @@ class MonitoringManager:
         
         if success:
             _LOGGER.info(f"Successfully reconnected to {device_name} ({ip})")
-            if active_device:
-                self.device_manager.update_active_device(
-                    device_key=device_key,
-                    status='connected',
-                    reconnect_attempts=0,
-                    last_reconnect=datetime.now().isoformat(),
-                    current_dashboard=dashboard_url
-                )
+            self.device_manager.update_active_device(
+                device_key=device_key,
+                status='connected',
+                reconnect_attempts=0,
+                app_id=full_status.get('app_id'),
+                display_name=full_status.get('display_name'),
+                last_reconnect=datetime.now().isoformat(),
+                current_dashboard=dashboard_url
+            )
             if self.stats_manager:
                 await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_SUCCESS)
             return True
         else:
             _LOGGER.error(f"Failed to reconnect to {device_name} ({ip})")
-            if active_device:
-                self.device_manager.update_active_device(device_key, 'disconnected', last_checked=datetime.now().isoformat())
+            self.device_manager.update_active_device(device_key, 'disconnected', last_checked=datetime.now().isoformat())
             if self.stats_manager:
                 await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
             return False

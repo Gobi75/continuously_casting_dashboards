@@ -663,7 +663,7 @@ class ContinuouslyCastingDashboards:
             status_listener = async_track_time_interval(
                 self.hass,
                 self.stats_manager.async_generate_status_data,
-                timedelta(minutes=5),
+                timedelta(minutes=1),
             )
             self.unsubscribe_listeners.append(status_listener)
             _LOGGER.debug("Status update listener created: %s", id(status_listener))

@@ -121,7 +121,7 @@ class ContinuouslyCastingSensorBase(SensorEntity):
         return {
             "identifiers": {(DOMAIN, self.entry.entry_id)},
             "name": "Continuously Casting Dashboards",
-            "manufacturer": "CCD",
+            "manufacturer": "Continuously Casting Dashboards",
             "model": "Integration",
         }
 

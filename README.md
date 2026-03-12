@@ -49,6 +49,7 @@ This version is a complete overhaul of the original integration, focusing on sta
 * **⚡ Optimized Self-Healing:** Streamlined logic loop for instant recovery. The adjustable delay (default 45s) is now pinpoint accurate.
 * **🔊 Smart Volume:** Optional checkbox to force a startup volume or maintain current device levels.
 * **🤖 Nest Hub 2 Ready:** Specifically patched for 2nd Gen display stability.
+* **📦 Updated Engine:** Upgraded to `catt==0.13.1`. This ensures compatibility with **Python 3.13** and allows the integration to correctly access the `info` attribute, which was broken in older versions.
 
 ## 📋 Requirements
 

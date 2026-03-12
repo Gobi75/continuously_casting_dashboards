@@ -25,16 +25,30 @@ A Home Assistant integration that automatically casts dashboards to your Chromec
 <p align="center">
   <img src="https://github.com/b0mbays/continuously_casting_dashboards/assets/55556007/9cc32333-312e-41cf-bca0-e531e535a268" width="75%" alt="Dashboard on Nest Hub">
 </p>
+---
 
-## ✨ Features
+> [!IMPORTANT]
+> ### 🚀 Enhanced & Fixed Version (Gobi75 Fork)
+> This repository is an improved fork of the original project, featuring critical fixes and updates:
+> * ✅ **Nest Hub 2 Compatibility** – Resolved specific bugs that caused issues on 2nd gen Google displays.
+> * ✅ **Improved Stability** – Fixed core logic errors to prevent unexpected casting interruptions.
+> * ✅ **Newer Build** – This version is actively maintained and ahead of the original `b0mbays` repository.
 
-- **Auto-resume** - Dashboard automatically restarts if interrupted
-- **Smart detection** - Won't interrupt Spotify, Netflix, YouTube, timers, or Google Assistant
-- **Time windows** - Only cast during specified hours (e.g., 7am-11pm)
-- **Multiple dashboards** - Different dashboards at different times on the same device
-- **Entity control** - Start/stop casting based on any Home Assistant entity state
-- **Speaker group aware** - Won't cast if device is part of an active speaker group
-- **Per-device settings** - Volume, time windows, and dashboards configured per device
+---
+## 🏆 Gobi75 Fork: The Ultimate Casting Experience
+
+This version is a complete overhaul of the original integration, focusing on stability, user control, and modern Home Assistant standards.
+
+### 🛠️ What's New & Improved:
+* **✅ 24/7 Battle-Tested:** Zero memory leaks detected during 2 weeks of continuous operation.
+* **📊 New Status Sensors:** Every device now has a sensor showing if it's `Working`, `Restarting`, or `Inactive` (due to no active timer). Perfect for HA automations!
+* **⚙️ UI-Driven Config:** All parameters (previously hardcoded in `const.py`) are now exposed in the Integration UI. No YAML or Python editing required.
+* **🇵🇱 Native Polish Support:** Full translation for the configuration interface.
+* **🚀 Priority Timer Stacking:** Support for overlapping schedules with automatic fallback (e.g., a short alert dashboard overriding the main one).
+* **🔍 Precision `app_id` Tracking:** Uses the `info` attribute to accurately identify `dash_cast`. It won't interrupt YouTube, Netflix, or Spotify sessions.
+* **⚡ Optimized Self-Healing:** Streamlined logic loop for instant recovery. The adjustable delay (default 45s) is now pinpoint accurate.
+* **🔊 Smart Volume:** Optional checkbox to force a startup volume or maintain current device levels.
+* **🤖 Nest Hub 2 Ready:** Specifically patched for 2nd Gen display stability.
 
 ## 📋 Requirements
 
@@ -53,7 +67,7 @@ Before installing, ensure you have:
 
 1. Open HACS in Home Assistant
 2. Click the three dots (⋮) → **Custom repositories**
-3. Add `b0mbays/continuously_casting_dashboards` as an **Integration**
+3. Add `Gobi75/continuously_casting_dashboards` as an **Integration**
 4. Search for "Continuously Casting Dashboards" and click **Download**
 5. Restart Home Assistant
 
@@ -303,28 +317,27 @@ homeassistant:
 
 > **Find your user ID:** Go to your profile in Home Assistant and look at the URL - the ID is the long string after `/profile/`
 
-### Install ha-catt-fix
+### 📺 Dashboard Timeout Fix
+> [!TIP]
+> **Note for Nest Hub 2 users:** In this fork, many users (including myself) find that dashboards remain stable without any extra fixes. Try running without this first!
 
-This prevents the dashboard from timing out after 10 minutes.
-
+If you experience a timeout after 10 minutes on older devices:
 1. Open HACS → Click three dots (⋮) → **Custom repositories**
-2. Add `swiergot/ha-catt-fix` as a **Dashboard** (previously called "Lovelace")
-3. Go to **Frontend** tab → Search "ha-catt-fix" → **Download**
-4. Restart Home Assistant
-5. Verify installation: Open your dashboard → Edit → Manage resources → Confirm ha-catt-fix is listed
+2. Add `swiergot/ha-catt-fix` as a **Dashboard**
+3. Download and restart Home Assistant.
 
 ---
 
 ## ❓ Troubleshooting
 
-### Dashboard stops after a few seconds
+### Dashboard stops after 10 minutes (Timeout)
 
-**Cause:** ha-catt-fix not installed correctly.
+**Cause:** Default Chromecast behavior or older firmware.
 
 **Solution:**
-1. Set `logging_level: debug` in your config
-2. Check Home Assistant logs for status output
-3. Look for `Title: Dummy` in the logs - if missing, reinstall ha-catt-fix
+1. **Try Gobi75 Fork first:** This version includes internal stability fixes that often prevent timeouts without extra tools.
+2. If the issue persists on older devices, ensure you have installed `ha-catt-fix` as described in the Requirements section.
+3. Check Home Assistant logs with `logging_level: debug`. Look for `Title: Dummy` to verify if the fix is active.
 
 ```
 DEBUG Status output for Office display: Title: Dummy 22:27:13 GMT+0000

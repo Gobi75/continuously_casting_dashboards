@@ -396,7 +396,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 else:
                     cleaned_input["dashboard_url"] = dashboard_url
 
-                # LOGIKA CHECKBOXA: Zapisuj głośność tylko jeśli zaznaczono override
+                # CHECKBOX LOGIC: Record volume only if override is checked
                 if user_input.get("override_volume"):
                     cleaned_input["volume"] = user_input.get("volume")
                     cleaned_input["override_volume"] = True
@@ -439,7 +439,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 _LOGGER.exception("Error adding dashboard: %s", ex)
                 errors["base"] = "unknown"
 
-        # Formularz z dodanym checkboxem override_volume
+        #Form with added override volume checkbox
         entry = self._get_entry()
         global_config = dict(entry.data)
         global_config.update(entry.options)
@@ -671,7 +671,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 else:
                     cleaned_input["dashboard_url"] = dashboard_url
 
-                # ZMIANA: Zapisuj głośność tylko jeśli checkbox jest zaznaczony
+                # CHANGE: Record volume only if checkbox is checked
                 if user_input.get("override_volume"):
                     cleaned_input["volume"] = user_input.get("volume")
                     cleaned_input["override_volume"] = True
@@ -735,7 +735,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         has_entity = bool(current.get("switch_entity_id"))
         has_groups = bool(current.get("speaker_groups"))
         
-        # ZMIANA: Sprawdzenie czy głośność jest obecnie ustawiona (czy nie jest None)
+        # CHANGE: Check if the volume is currently set (or not None)
         is_volume_set = current.get("volume") is not None
 
         # Get global settings for defaults
@@ -750,7 +750,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             vol.Required(
                 "dashboard_url", default=current.get("dashboard_url", "")
             ): cv.string,
-            # ZMIANA: Nowy checkbox do sterowania głośnością
+            # CHANGE: New checkbox for volume control
             vol.Optional(
                 "override_volume", default=is_volume_set
             ): cv.boolean,
@@ -815,7 +815,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         if dashboard_url:
             cleaned_input["dashboard_url"] = dashboard_url
 
-        # ZMIANA: Sprawdzamy nasz nowy checkbox 'override_volume'
+        # CHANGE: We are checking our new 'override volume' checkbox
         if user_input.get("override_volume"):
             cleaned_input["volume"] = user_input.get("volume")
             cleaned_input["override_volume"] = True

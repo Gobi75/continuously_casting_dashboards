@@ -53,7 +53,7 @@ class TimeWindowChecker:
         active_config = None
         found_match = False
         
-        _LOGGER.debug(f"!!! MODYFIKACJA DZIALA !!! Sprawdzam {len(device_configs)} konfiguracji dla {device_name}")
+        _LOGGER.debug(f"!!! MODIFICATION WORKS!!! Checking {len(device_configs)} configurations for {device_name}")
 
         for config in device_configs:
             device_start = config.get("start_time", self.default_start_time)
@@ -78,11 +78,11 @@ class TimeWindowChecker:
                 config["parsed_end_time"] = end_time
                 active_config = config
                 found_match = True
-                _LOGGER.debug(f"Dopasowano okno: {start_time}-{end_time} dla URL: {config.get('dashboard_url')}")
+                _LOGGER.debug(f"Matched window: {start_time}-{end_time} for URL: {config.get('dashboard_url')}")
 
-        # Zwracamy wynik dopiero PO sprawdzeniu całej pętli for
+        # Return the result only AFTER checking the entire for loop
         if found_match:
-            _LOGGER.debug(f"WYGRYWA: {active_config.get('dashboard_url')}")
+            _LOGGER.debug(f"Selected: {active_config.get('dashboard_url')}")
             return active_config, True
 
         if device_configs:

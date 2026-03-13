@@ -122,7 +122,7 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
         schema = vol.Schema(
             {
                 vol.Required(
-                    "logging_level", default=self.config_entry.options.get("logging_level", DEFAULT_LOGGING_LEVEL)
+                    "logging_level", default=DEFAULT_LOGGING_LEVEL
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[
@@ -135,30 +135,30 @@ class ContinuouslyCastingDashboardsConfigFlow(config_entries.ConfigFlow, domain=
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Required("cast_delay", default=self.config_entry.options.get("cast_delay", DEFAULT_CAST_DELAY)): selector.NumberSelector(
+                vol.Required("cast_delay", default=DEFAULT_CAST_DELAY): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=5, max=300, mode=selector.NumberSelectorMode.BOX)
                 ),
-                vol.Required("scan_interval", default=self.config_entry.options.get("scan_interval", DEFAULT_SCAN_INTERVAL)): selector.NumberSelector(
+                vol.Required("scan_interval", default=DEFAULT_SCAN_INTERVAL): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=5, max=3600, mode=selector.NumberSelectorMode.BOX)
                 ),
-                vol.Required("max_retries", default=self.config_entry.options.get("max_retries", DEFAULT_MAX_RETRIES)): selector.NumberSelector(
+                vol.Required("max_retries", default=DEFAULT_MAX_RETRIES): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=20, mode=selector.NumberSelectorMode.BOX)
                 ),
-                vol.Required("retry_delay", default=self.config_entry.options.get("retry_delay", DEFAULT_RETRY_DELAY)): selector.NumberSelector(
+                vol.Required("retry_delay", default=DEFAULT_RETRY_DELAY): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=1, max=60, mode=selector.NumberSelectorMode.BOX)
                 ),
-                vol.Required("casting_timeout", default=self.config_entry.options.get("casting_timeout", DEFAULT_CASTING_TIMEOUT)): selector.NumberSelector(
+                vol.Required("casting_timeout", default=DEFAULT_CASTING_TIMEOUT): selector.NumberSelector(
                     selector.NumberSelectorConfig(min=10, max=300, mode=selector.NumberSelectorMode.BOX)
                 ),
                 vol.Optional(
-                    "start_time", default=self.config_entry.options.get("start_time", DEFAULT_START_TIME)
+                    "start_time", default=DEFAULT_START_TIME
                 ): selector.TimeSelector(),
                 vol.Optional(
-                    "end_time", default=self.config_entry.options.get("end_time", DEFAULT_END_TIME)
+                    "end_time", default=DEFAULT_END_TIME
                 ): selector.TimeSelector(),
-                vol.Optional("include_entity", default=self.config_entry.options.get("include_entity", False)): cv.boolean,
-                vol.Optional("switch_entity_id", default=self.config_entry.options.get("switch_entity_id", "")): cv.string,
-                vol.Optional("switch_entity_state", default=self.config_entry.options.get("switch_entity_state", "")): cv.string,
+                vol.Optional("include_entity", default=False): cv.boolean,
+                vol.Optional("switch_entity_id", default=""): cv.string,
+                vol.Optional("switch_entity_state", default=""): cv.string,
             }
         )
 

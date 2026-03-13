@@ -25,30 +25,30 @@ class CastingManager:
         if ip in self.active_casting_operations: return False
         self.active_casting_operations[ip] = {'start_time': time.time()}
         try:
-            # 1. Pobieranie głośności - Logika poprawiona o priorytet checkboxa
+            # 1. Get volume - Logic improved with checkbox priority
             if device_config.get("override_volume", False):
                 vol_to_set = int(device_config.get("volume", 5))
-                log_msg = f"Wymuszono głośność z ustawień: {vol_to_set}%"
+                log_msg = f"Forced volume from settings: {vol_to_set}%"
             else:
                 info = await self._get_raw_info(ip)
                 match = re.search(r'volume_level:\s*([\d\.]+)', info)
                 vol_raw = match.group(1) if match else "0.1"
                 vol_to_set = int(round(float(vol_raw) * 100))
-                log_msg = f"Zapamiętano głośność: {vol_to_set}%"
+                log_msg = f"Volume remembered: {vol_to_set}%"
 
             _LOGGER.info(f"CAST START: {ip} | {log_msg}")
 
-            # 2. Procedura rzutowania
+            # 2. Cast procedure
             await (await asyncio.create_subprocess_exec('catt', '-d', ip, 'volume', '0')).wait()
             await (await asyncio.create_subprocess_exec('catt', '-d', ip, 'stop')).wait()
             await (await asyncio.create_subprocess_exec('catt', '-d', ip, 'cast_site', dashboard_url)).wait()
 
-            # 3. Stabilizacja
+            # 3. Stabilization
             await asyncio.sleep(15)
             
-            # 4. Ustawienie docelowej głośności
+            # 4. Setting the target volume
             await (await asyncio.create_subprocess_exec('catt', '-d', ip, 'volume', str(vol_to_set))).wait()
-            _LOGGER.info(f"CAST SUCCESS: {ip} | Dashboard aktywny, głośność: {vol_to_set}%")
+            _LOGGER.info(f"CAST SUCCESS: {ip} | Dashboard active, volume: {vol_to_set}%")
 
             return True
         except Exception as e:

@@ -15,9 +15,9 @@ from .const import (
     STATUS_CASTING_IN_PROGRESS,
     STATUS_ASSISTANT_ACTIVE,
     CONF_SWITCH_ENTITY,
-    DEFAULT_SCAN_INTERVAL,       # Dodaj to
-    DEFAULT_MAX_RETRIES,        # Dodaj to
-    DEFAULT_CASTING_TIMEOUT,     # Dodaj to
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_MAX_RETRIES,
+    DEFAULT_CASTING_TIMEOUT,
     STATUS_STOPPED_BY_TIMER
 )
 
@@ -39,7 +39,7 @@ class MonitoringManager:
         self.stats_manager = None  # Will be set later
         self.devices = config.get(CONF_DEVICES, {})
         self.cast_delay = config.get('cast_delay', 0)
-        # Nowe parametry pobrane z konfiguracji integracji
+        # New parameters taken from integration configuration
         self.scan_interval = config.get('scan_interval', DEFAULT_SCAN_INTERVAL)
         self.max_retries = config.get('max_retries', DEFAULT_MAX_RETRIES)
         self.casting_timeout = config.get('casting_timeout', DEFAULT_CASTING_TIMEOUT)
@@ -138,7 +138,7 @@ class MonitoringManager:
             """Process a single device - extracted from async_monitor_devices for reuse."""
             device_key = f"{device_name}_{ip}"
             
-            # --- START: POBIERANIE STATUSU (RAZ A PORZADNIE) ---
+            # --- START: DOWNLOADING STATUS ---
             full_status = await self.device_manager.async_get_full_device_status(ip)
             
             is_casting = full_status.get('is_our_dashboard', False)
@@ -147,8 +147,8 @@ class MonitoringManager:
             is_idle = full_status.get('is_backdrop', False) or not full_status.get('is_online', False) or full_status.get('app_id') is None or full_status.get('app_id') == 'None'
             status_output = full_status.get('output', "")
             
-            _LOGGER.debug(f"CYCLE_START [{device_name}]: AppID: {full_status.get('app_id')} | Nasz Dashboard: {is_casting}")
-            # --- END: POBIERANIE STATUSU ---
+            _LOGGER.debug(f"CYCLE_START [{device_name}]: AppID: {full_status.get('app_id')} | Our Dashboard: {is_casting}")
+            # --- END: DOWNLOADING STATUS ---
             
             # Check if casting is enabled for this specific device
             if not await self.switch_checker.async_check_switch_entity(device_name, current_config):
@@ -170,7 +170,7 @@ class MonitoringManager:
             # Check if the current time is within any of the device's time windows
             _, is_in_window = self.time_window_checker.get_current_device_config(device_name, self.devices[device_name])
                 
-            # --- LOGIKA WYJSCIA Z OKNA CZASOWEGO (ZINTEGROWANA) ---
+            # --- TIME WINDOW EXIT LOGIC (INTEGRATED) ---
             active_device = self.device_manager.get_active_device(device_key)
             previous_status = active_device.get('status', 'unknown') if active_device else 'unknown'
 
@@ -406,12 +406,12 @@ class MonitoringManager:
                     else:
                         self.device_manager.update_active_device(device_key, 'connected', last_checked=datetime.now().isoformat())
                 elif is_idle:
-                    # RESETUJEMY LICZNIK, jesli widzimy Backdrop - to nie jest blad!
+                    # We RESET THE COUNTER if we see a Backdrop - it's not an error!
                     is_backdrop = "E8C28D3C" in status_output or "backdrop" in status_output.lower()
                     if is_backdrop:
                         self.device_manager.update_active_device(device_key, previous_status, reconnect_attempts=0)
                     
-                    # DYNAMICZNY CZAS: 2s dla Backdropa, 30s dla innych stanow bezczynnosci
+                    # DYNAMIC TIME: 2s for Backdrop, 30s for other idle states
                     min_time_between_reconnects = 2 if is_backdrop else 30
                     time_since_last_change = current_time - last_status_change
                     
@@ -575,10 +575,10 @@ class MonitoringManager:
                 _LOGGER.info(f"Outside casting time window for {device_name}, skipping initial cast")
                 continue
             
-            # Pobieramy pelny status urzadzenia
+            # Get full device status
             full_status = await self.device_manager.async_get_full_device_status(ip)
             
-            # Sprawdzamy, czy w tym statusie flaga 'is_media_playing' jest True
+            # We check if the 'is_media_playing' flag is True in this status
             if full_status.get('is_media_playing', False):
                 _LOGGER.info(f"Media is currently playing on {device_name}, skipping cast")
                 device_key = f"{device_name}_{ip}"
@@ -634,20 +634,20 @@ class MonitoringManager:
                 _LOGGER.error(f"Could not get IP for {device_name}, skipping")
                 return
 
-        # --- ZABEZPIECZENIE PRZED LAGIEM URZADZENIA ---
+        # --- DEVICE LAG PROTECTION ---
         try:
-            # Czekamy max 5 sekund na status. Jesli Mi Box "muli", idziemy dalej.
+            # We wait a maximum of 5 seconds for the status. If it says "not responding," we move on.
             full_status = await asyncio.wait_for(
                 self.device_manager.async_get_full_device_status(ip), 
                 timeout=5.0
             )
         except Exception as e:
-            _LOGGER.warning(f"Timeout lub błąd pobierania statusu z {ip} ({device_name}): {e}")
-            # Tworzymy bezpieczny pusty status, zeby reszta kodu sie nie wywalila
+            _LOGGER.warning(f"Timeout or error getting status from {ip} ({device_name}): {e}")
+            # We create a safe empty status so that the rest of the code doesn't crash
             full_status = {'app_id': 'Unknown', 'display_name': 'Unknown'}
         # ----------------------------------------------
 
-        # Reszta kodu pozostaje bez zmian (wykorzystuje full_status.get)
+        # The rest of the code remains unchanged (uses full_status.get)
         if is_media_playing:
             _LOGGER.info(f"Media is currently playing on {device_name}, skipping cast")
             device_key = f"{device_name}_{ip}"
@@ -870,18 +870,18 @@ class MonitoringManager:
         """Zoptymalizowany reconnect - uzywa danych z full_status zamiast pytac urzadzenie."""
         device_key = f"{device_name}_{ip}"
         
-        # Jesli nie przekazalismy statusu (np. wywolanie reczne), pobierz go (bezpiecznik)
+        # If we didn't pass the status (e.g. manual call), get it
         if not full_status:
             full_status = await self.device_manager.async_get_full_device_status(ip)
         
-        # Wyciagamy potrzebne dane ze statusu
+        # We extract the necessary data from the status
         is_media_playing = full_status.get('is_media_playing', False)
         is_backdrop = full_status.get('is_backdrop', False)
         is_tts_receiver = "CC1AD845" in full_status.get('output', "")
         is_our_dash = full_status.get('is_our_dashboard', False)
         status_output = full_status.get('output', "")
 
-        # BLOK 1: Sprawdzenie trwajacego castingu
+        # BLOCK 1: Checking the ongoing casting
         if ip in self.casting_manager.active_casting_operations:
             _LOGGER.info(f"Casting already in progress for {device_name} ({ip}), skipping reconnect")
             self.device_manager.update_active_device(
@@ -893,23 +893,23 @@ class MonitoringManager:
             )
             return False
         
-        # BLOK 2: Okno czasowe (zostawiamy dla pewnosci)
+        # BLOCK 2: Time window (leave for safety)
         if not await self.time_window_checker.async_is_within_time_window(device_name, device_config):
             _LOGGER.info(f"Outside casting time window for {device_name}, skipping reconnect")
             return False
         
-        # BLOK 3 & 4: Media i Grupy (Uzywamy gotowych danych)
+        # BLOCK 3 & 4: Media and Groups (We use ready-made data)
         if is_media_playing:
             _LOGGER.info(f"Media is currently playing on {device_name}, skipping reconnect")
             self.device_manager.update_active_device(device_key, 'media_playing')
             return False
 
-        # BLOK 5: Zarzadzanie licznikami i Backing off
+        # BLOCK 5: Counter Management and Backing Off
         active_device = self.device_manager.get_active_device(device_key)
         if active_device:
             attempts = active_device.get('reconnect_attempts', 0) + 1
             
-            # Resetowanie licznika jesli widzimy Backdrop/TTS/Nasze
+            # Resetting the counter if we see Backdrop/TTS/Our
             if is_backdrop or is_tts_receiver or is_our_dash:
                 attempts = 0
             
@@ -921,8 +921,8 @@ class MonitoringManager:
                     await self.stats_manager.async_update_health_stats(device_key, EVENT_RECONNECT_FAILED)
                 return False
 
-        # BLOK 6: Decyzja o bezpieczenstwie recastu (Uzywamy danych z full_status)
-        # Jesli to nie nasz dash, nie backdrop i output jest dlugi -> cos innego tam gra
+        # BLOCK 6: Recast Security Decision (We use data from full_status)
+        # If it's not our dash, not the backdrop and the output is long -> something else is playing there
         app_id = full_status.get('app_id')
         is_none = app_id is None or app_id == 'None' or app_id == ''
         is_safe_to_recast = is_backdrop or is_our_dash or is_none or "8123" in status_output
@@ -931,7 +931,7 @@ class MonitoringManager:
             self.device_manager.update_active_device(device_key, 'other_content')
             return False
         
-        # BLOK 7: Wykonanie castingu
+        # BLOCK 7: Casting
         self.device_manager.update_active_device(
             device_key=device_key,
             status=STATUS_CASTING_IN_PROGRESS,

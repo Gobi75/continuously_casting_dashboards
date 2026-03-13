@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from homeassistant.core import HomeAssistant
 
-# Importujemy stałą, aby zliczanie statystyk było spójne z resztą systemu
+# We import the constant to make the statistics count consistent with the rest of the system
 from .const import STATUS_STOPPED_BY_TIMER
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ class DeviceManager:
         if not status_output:
             return False
         status_lower = status_output.lower()
-        # Ignorujemy wzmianki o Home Assistant, żeby nie mylić go z Google Assistant
+        # We are ignoring mentions of Home Assistant to avoid confusion with Google Assistant.
         sanitized = status_lower.replace("homeassistant", "").replace("home assistant", "")
 
         if "google assistant" in sanitized or re.search(r"\bassistant\b", sanitized):
@@ -76,7 +76,7 @@ class DeviceManager:
             return None, None, None, str(e)
 
     async def async_get_full_device_status(self, ip):
-        """POBIERANIE STATUSU: Jedno zapytanie do Chromecasta, komplet informacji zwrotnych."""
+        """STATUS GETTING: One request to Chromecast, complete feedback."""
         stdout_str, _, returncode, _ = await self._async_run_status_command(ip)
         
         if not stdout_str or returncode != 0:
@@ -92,7 +92,7 @@ class DeviceManager:
 
         status_lower = stdout_str.lower()
         
-        # --- NOWE: Wyciąganie app_id z tekstu ---
+        # --- NEW: Extracting app_id from text---
         current_app_id = None
         for line in stdout_str.splitlines():
             if "app_id:" in line.lower():
@@ -100,13 +100,13 @@ class DeviceManager:
                 break
         # ---------------------------------------
         
-        # 1. Nasz Dashboard (AppID DashCast)
+        # 1. Our Dashboard (AppID DashCast)
         is_ours = any(x in status_lower for x in ["84912283", "dashcast"])
         
-        # 2. Backdrop (Wygaszacz/Pulpit Google)
+        # 2. Backdrop 
         is_backdrop = any(x in status_lower for x in ["e8c28d3c", "backdrop"])
         
-        # 3. Asystent Google (Timer/Alarm)
+        # 3. Google Assistant (Timer/Alarm)
         assistant_active = self._status_indicates_assistant_activity(stdout_str)
         
         # 4. Multimedia (Spotify/YouTube itp.)
@@ -119,7 +119,7 @@ class DeviceManager:
             "is_media_playing": is_media,
             "is_assistant_active": assistant_active,
             "is_backdrop": is_backdrop,
-            "app_id": current_app_id,  # <--- TERAZ PRZEKAZUJEMY TO DALEJ
+            "app_id": current_app_id,
             "output": stdout_str
         }
 

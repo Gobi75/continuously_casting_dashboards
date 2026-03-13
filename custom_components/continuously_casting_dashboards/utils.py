@@ -66,7 +66,7 @@ class TimeWindowChecker:
                 _LOGGER.error(f"Error parsing time window for {device_name}: {str(e)}")
                 continue
 
-            # Sprawdzamy dopasowanie
+            # We check the fit
             matched_now = False
             if start_time <= end_time:
                 matched_now = start_time <= now <= end_time

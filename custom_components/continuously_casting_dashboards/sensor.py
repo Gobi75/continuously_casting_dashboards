@@ -36,7 +36,7 @@ async def async_setup_entry(
 
     entities = []
 
-    # TYLKO KLUCZE - nazwy zostaną pobrane z pl.json/en.json przez translation_key
+    # ONLY KEYS - names will be retrieved from pl.json/en.json via translation_key
     summary_types = [
         "total_devices",
         "connected_devices",

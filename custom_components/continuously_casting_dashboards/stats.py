@@ -90,10 +90,10 @@ class StatsManager:
             _LOGGER.warning("Device manager not set in StatsManager")
             return {}
             
-        # Pobieramy pełne statystyki (w tym stopped_by_timer_devices) z device_manager
+        # We download full statistics (including stopped_by_timer_devices) from device_manager
         status_data = self.device_manager.get_summary_stats()
         
-        # Dodajemy pozostałe wymagane pola
+        # We add the remaining required fields
         active_devices = self.device_manager.get_all_active_devices()
         status_data['last_updated'] = datetime.now().isoformat()
         status_data['devices'] = {}
@@ -105,8 +105,8 @@ class StatsManager:
             status_data['devices'][device_name] = {
                 'ip': ip,
                 'status': device.get('status', 'unknown'),
-                'app_id': device.get('app_id', 'Unknown'),       # Pobieramy z managera
-                'display_name': device.get('display_name', 'Unknown'), # Pobieramy z managera
+                'app_id': device.get('app_id', 'Unknown'),
+                'display_name': device.get('display_name', 'Unknown'),
                 'last_checked': device.get('last_checked', ''),
                 'reconnect_attempts': device.get('reconnect_attempts', 0)
             }
